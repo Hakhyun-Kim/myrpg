@@ -19,6 +19,15 @@ npm run dev        # 서버(7777) + 클라이언트(5173) 동시 기동
 npm run bot -- --name woodbot --loop
 ```
 
+## AI로 플레이하기 (MCP)
+
+이 저장소의 [.mcp.json](.mcp.json)이 `myrpg` MCP 서버를 등록한다 — Claude Code에서 이 프로젝트를 열면
+AI가 `join / look / goto / gather / say` 도구로 직접 게임에 입장해 플레이할 수 있다.
+"woodbot이라는 이름으로 들어가서 나무 10개 캐줘"라고 말하면 된다.
+
+MCP 서버는 전용 API가 아니다 — 내부적으로 PROTOCOL.md의 WebSocket 프로토콜로 접속하는
+또 하나의 클라이언트일 뿐이며(P6), 서버 판정이므로 사람보다 빠를 수 없다.
+
 테스트 / 타입체크:
 ```bash
 npm test
