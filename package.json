@@ -1,0 +1,23 @@
+{
+  "name": "myrpg",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "cross-env PORT=7777 npm -w @myrpg/server run dev",
+    "dev:client": "npm -w @myrpg/client run dev",
+    "build": "npm -w @myrpg/server run build && npm -w @myrpg/client run build",
+    "start": "npm -w @myrpg/server run start",
+    "bot": "npm -w @myrpg/bot run start --",
+    "test": "npm -w @myrpg/server run test",
+    "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3"
+  }
+}
