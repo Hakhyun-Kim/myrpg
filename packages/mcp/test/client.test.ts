@@ -22,13 +22,12 @@ beforeAll(async () => {
         gatherRange: 48,
         nodeCapacity: 5,
         nodeRespawnMs: 1000,
-        loginTimeoutMs: 10_000,
         rateLimitPerSec: 1000,
       },
     },
     storage: new MemoryStorage(),
   });
-  url = `ws://127.0.0.1:${server.port}/ws`;
+  url = `ws://127.0.0.1:${server.port}`;
 });
 
 afterAll(async () => {

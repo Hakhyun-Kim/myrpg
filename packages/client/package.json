@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@myrpg/protocol": "*",
+    "colyseus.js": "^0.15.28",
     "phaser": "^3.87.0"
   },
   "devDependencies": {

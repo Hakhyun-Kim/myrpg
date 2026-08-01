@@ -1,6 +1,7 @@
 import Phaser from "phaser";
+import type { Room } from "colyseus.js";
 import { GAME } from "@myrpg/protocol";
-import { Connection, serverUrl } from "./net.js";
+import { joinGame } from "./net.js";
 import { GameScene, pushChat } from "./GameScene.js";
 
 const form = document.getElementById("login-form") as HTMLFormElement;
@@ -22,48 +23,42 @@ form.addEventListener("submit", (e) => {
 
 async function enter(name: string): Promise<void> {
   try {
-    const conn = await Connection.connect(serverUrl());
-    conn.on("error", (msg) => {
-      if (msg.code === "auth_failed") {
-        errEl.textContent = "이 이름은 다른 토큰으로 등록되어 있습니다. 다른 이름을 쓰세요.";
-      } else {
-        errEl.textContent = `오류: ${msg.message}`;
-      }
-    });
-    conn.on("welcome", (welcome) => {
-      localStorage.setItem("myrpg.lastName", name);
-      localStorage.setItem(`myrpg.token.${name}`, welcome.token);
-      document.getElementById("login")!.style.display = "none";
-      document.getElementById("hud")!.style.display = "block";
-
-      const game = new Phaser.Game({
-        type: Phaser.AUTO,
-        parent: "app",
-        backgroundColor: "#1a1a24",
-        scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
-        scene: [],
-      });
-      game.scene.add("game", GameScene, true, { conn, welcome });
-      wireChat(conn);
-
-      conn.onClose = () => {
-        pushChat("서버 연결이 끊어졌습니다. 새로고침하세요.", true);
-      };
-    });
     const token = localStorage.getItem(`myrpg.token.${name}`) ?? undefined;
-    conn.send({ type: "login", name, token });
+    const { room, welcome } = await joinGame(name, token);
+
+    localStorage.setItem("myrpg.lastName", name);
+    localStorage.setItem(`myrpg.token.${name}`, welcome.token);
+    document.getElementById("login")!.style.display = "none";
+    document.getElementById("hud")!.style.display = "block";
+
+    const game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: "app",
+      backgroundColor: "#1a1a24",
+      scale: { mode: Phaser.Scale.RESIZE, width: window.innerWidth, height: window.innerHeight },
+      scene: [],
+    });
+    game.scene.add("game", GameScene, true, { room, welcome });
+    wireChat(room);
+
+    room.onLeave((code) => {
+      pushChat(code === 4001 ? "다른 곳에서 접속해 연결이 종료됐습니다." : "서버 연결이 끊어졌습니다. 새로고침하세요.", true);
+    });
   } catch (err) {
-    errEl.textContent = (err as Error).message;
+    const msg = (err as Error).message ?? String(err);
+    errEl.textContent = msg.includes("auth_failed")
+      ? "이 이름은 다른 토큰으로 등록되어 있습니다. 다른 이름을 쓰세요."
+      : `오류: ${msg}`;
   }
 }
 
-function wireChat(conn: Connection): void {
+function wireChat(room: Room): void {
   const input = document.getElementById("chat-input") as HTMLInputElement;
   input.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Enter") {
       const text = input.value.trim();
-      if (text.length > 0) conn.send({ type: "chat", text });
+      if (text.length > 0) room.send("chat", { text });
       input.value = "";
       input.blur();
     }

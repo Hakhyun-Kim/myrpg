@@ -5,19 +5,21 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:bufferutil --external:utf-8-validate --banner:js=\"import{createRequire}from'module';const require=createRequire(import.meta.url);\"",
+    "build": "esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:colyseus --external:@colyseus/* --external:zod --external:bufferutil --external:utf-8-validate",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@myrpg/protocol": "*",
+    "colyseus": "^0.15.57",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.12",
+    "colyseus.js": "^0.15.28",
     "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",

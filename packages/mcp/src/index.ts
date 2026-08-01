@@ -8,7 +8,7 @@ import { z } from "zod";
 import { GAME } from "@myrpg/protocol";
 import { GameClient } from "./client.js";
 
-const SERVER_URL = process.env.MYRPG_URL ?? "ws://localhost:7777/ws";
+const SERVER_URL = process.env.MYRPG_URL ?? "ws://localhost:7777";
 const client = new GameClient();
 
 const mcp = new McpServer({ name: "myrpg", version: "0.1.0" });

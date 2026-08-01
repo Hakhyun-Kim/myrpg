@@ -1,15 +1,17 @@
-// 레퍼런스 채집 봇 — PROTOCOL.md만 보고 작성했다. @myrpg/protocol을 일부러 임포트하지 않는다.
+// 레퍼런스 채집 봇 — PROTOCOL.md의 룸 계약을 공식 JS SDK(colyseus.js)로 구현했다.
 // 이 파일이 "봇도 같은 문으로 들어온다"(P6)의 실증이자, LLM에게 봇을 짜게 할 때의 예제다.
 //
-// 사용:  npm run bot -- --name woodbot --url ws://localhost:7777/ws --loop
-import WebSocket from "ws";
+// 사용:  npm run bot -- --name woodbot --url ws://localhost:7777 --loop
+import { Client, type Room } from "colyseus.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const args = parseArgs(process.argv.slice(2));
-const url = args.url ?? "ws://localhost:7777/ws";
+const url = args.url ?? "ws://localhost:7777";
 const name = args.name ?? `bot_${Math.random().toString(36).slice(2, 8)}`;
 const loop = "loop" in args;
+
+const GATHER_RANGE = 48; // PROTOCOL.md §6
 
 // 토큰 보관 (data/는 gitignore)
 const tokenDir = "./data";
@@ -30,28 +32,30 @@ function saveToken(botName: string, token: string): void {
 
 type Json = Record<string, any>;
 
-const ws = new WebSocket(url);
+let room: Room;
+try {
+  const savedToken = loadTokens()[name];
+  room = await new Client(url).joinOrCreate("haran", { name, ...(savedToken ? { token: savedToken } : {}) });
+} catch (err) {
+  console.error(`[bot] 입장 실패: ${(err as Error).message}`);
+  process.exit(1);
+}
+
 const queue: Json[] = [];
 const waiters: { pred: (m: Json) => boolean; resolve: (m: Json) => void }[] = [];
-
-ws.on("message", (data) => {
-  const msg = JSON.parse(data.toString()) as Json;
-  const i = waiters.findIndex((w) => w.pred(msg));
-  if (i >= 0) waiters.splice(i, 1)[0]!.resolve(msg);
-  else queue.push(msg);
-});
-ws.on("close", (code) => {
+for (const type of ["welcome", "gather_started", "gather_result", "gather_failed"]) {
+  room.onMessage(type, (payload: Json) => {
+    const msg = { type, ...payload };
+    const i = waiters.findIndex((w) => w.pred(msg));
+    if (i >= 0) waiters.splice(i, 1)[0]!.resolve(msg);
+    else queue.push(msg);
+  });
+}
+room.onLeave((code) => {
   console.log(`[bot] 연결 종료 (${code})`);
   process.exit(0);
 });
-ws.on("error", (err) => {
-  console.error(`[bot] 연결 실패: ${err.message}`);
-  process.exit(1);
-});
 
-function send(msg: Json): void {
-  ws.send(JSON.stringify(msg));
-}
 function expectMsg(pred: (m: Json) => boolean, timeoutMs = 15000): Promise<Json> {
   const i = queue.findIndex(pred);
   if (i >= 0) return Promise.resolve(queue.splice(i, 1)[0]!);
@@ -60,57 +64,63 @@ function expectMsg(pred: (m: Json) => boolean, timeoutMs = 15000): Promise<Json>
     waiters.push({ pred, resolve: (m) => { clearTimeout(timer); resolve(m); } });
   });
 }
-
-await new Promise<void>((res) => ws.on("open", () => res()));
-
-// §4 로그인
-const savedToken = loadTokens()[name];
-send({ type: "login", name, ...(savedToken ? { token: savedToken } : {}) });
-const first = await expectMsg((m) => m.type === "welcome" || m.type === "error");
-if (first.type === "error") {
-  console.error(`[bot] 로그인 실패: ${first.code} — ${first.message}`);
-  process.exit(1);
+function waitState(pred: () => boolean, timeoutMs = 30_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (pred()) return resolve();
+    const start = Date.now();
+    const iv = setInterval(() => {
+      if (pred()) {
+        clearInterval(iv);
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(iv);
+        reject(new Error("상태 대기 시간 초과"));
+      }
+    }, 50);
+  });
 }
-const welcome = first;
+
+// 핸드셰이크: 핸들러 등록 후 welcome 요청
+room.send("hello");
+const welcome = await expectMsg((m) => m.type === "welcome");
 saveToken(name, welcome.token);
-console.log(`[bot] ${name} 입장 — ${welcome.map.id} (${welcome.you.x}, ${welcome.you.y}), 노드 ${welcome.nodes.length}개`);
 
-let me = { x: welcome.you.x as number, y: welcome.you.y as number };
-const nodes = new Map<string, Json>((welcome.nodes as Json[]).map((n) => [n.id, n]));
+const state = room.state as Json;
+await waitState(() => state.nodes?.size > 0 && state.players?.has(welcome.playerId));
+const myPos = () => state.players.get(welcome.playerId) as { x: number; y: number };
+console.log(
+  `[bot] ${name} 입장 — ${state.mapId} (${Math.round(myPos().x)}, ${Math.round(myPos().y)}), 노드 ${state.nodes.size}개`,
+);
 
-// 노드 상태를 계속 반영
-void (async () => {
-  for (;;) {
-    const upd = await expectMsg((m) => m.type === "node_update", 86_400_000);
-    nodes.set(upd.node.id, upd.node);
-  }
-})();
-
-// §10 최소 절차 반복
 do {
-  const alive = [...nodes.values()].filter((n) => n.remaining > 0);
-  if (alive.length === 0) {
+  // 살아있는 노드 중 가장 가까운 것
+  let targetId = "";
+  let target: Json | null = null;
+  let best = Infinity;
+  state.nodes.forEach((n: Json, id: string) => {
+    if (n.remaining <= 0) return;
+    const d = Math.hypot(n.x - myPos().x, n.y - myPos().y);
+    if (d < best) {
+      best = d;
+      target = n;
+      targetId = id;
+    }
+  });
+  if (!target) {
     console.log("[bot] 살아있는 노드 없음 — 5초 대기");
     await sleep(5000);
     continue;
   }
-  alive.sort((a, b) => hyp(a, me) - hyp(b, me));
-  const target = alive[0]!;
-  console.log(`[bot] 목표: ${target.id} (${target.kind}, 남은 ${target.remaining})`);
+  const t = target as Json;
+  console.log(`[bot] 목표: ${targetId} (${t.kind}, 남은 ${t.remaining})`);
 
-  send({ type: "move_to", x: target.x, y: target.y });
-  for (;;) {
-    const state = await expectMsg((m) => m.type === "state");
-    const mine = (state.players as Json[]).find((p) => p.id === welcome.playerId);
-    if (mine) me = { x: mine.x, y: mine.y };
-    if (hyp(target, me) <= 48) break;
-  }
+  room.send("move_to", { x: t.x, y: t.y });
+  await waitState(() => Math.hypot(t.x - myPos().x, t.y - myPos().y) <= GATHER_RANGE);
 
-  send({ type: "gather", nodeId: target.id });
+  room.send("gather", { nodeId: targetId });
   const started = await expectMsg((m) => m.type === "gather_started" || m.type === "gather_failed");
   if (started.type === "gather_failed") {
     console.log(`[bot] 채집 거부: ${started.reason}`);
-    nodes.get(target.id)!.remaining = 0; // 다음 후보로
     continue;
   }
   const result = await expectMsg((m) => m.type === "gather_result" || m.type === "gather_failed");
@@ -122,11 +132,9 @@ do {
 } while (loop);
 
 console.log("[bot] 1회 채집 완료 — 종료");
-ws.close();
+await room.leave();
+process.exit(0);
 
-function hyp(a: { x: number; y: number }, b: { x: number; y: number }): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

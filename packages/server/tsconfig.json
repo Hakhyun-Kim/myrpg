@@ -1,7 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    // @colyseus/schema의 defineTypes는 프로토타입에 접근자를 심는다 —
+    // ES2022 class field(defineProperty)가 이를 덮어쓰면 상태 동기화가 조용히 죽는다
+    "useDefineForClassFields": false
   },
   "include": ["src", "test"]
 }

@@ -1,17 +1,16 @@
 // GameClient — MCP 도구가 사용하는 게임 접속 계층.
-// 전용 API가 아니라 PROTOCOL.md의 WebSocket 프로토콜로 접속하는 "또 하나의 클라이언트"다 (P6).
-// LLM 에이전트는 턴 단위로 사고하므로, 틱 스트림을 "행동 → 완료까지 대기" 형태로 감싸 준다.
-import WebSocket from "ws";
+// 전용 API가 아니라 PROTOCOL.md의 룸 계약(colyseus.js)으로 접속하는 "또 하나의 클라이언트"다 (P6).
+// LLM 에이전트는 턴 단위로 사고하므로, 상태 스트림을 "행동 → 완료까지 대기" 형태로 감싸 준다.
+import { Client, type Room } from "colyseus.js";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   GAME,
+  ROOM_NAME,
   dist,
   type Inventory,
-  type MapView,
   type NodeView,
-  type PlayerView,
-  type ServerMsg,
+  type WelcomeMsg,
 } from "@myrpg/protocol";
 
 const TOKEN_DIR = process.env.MYRPG_DATA_DIR ?? "./data";
@@ -23,135 +22,147 @@ export interface ChatLine {
   t: number;
 }
 
-type Listener = (msg: ServerMsg) => void;
+type Json = Record<string, any>;
+const CAPTURED = ["chat", "gather_started", "gather_result", "gather_failed"] as const;
 
 export class GameClient {
-  private ws: WebSocket | null = null;
-  private listeners = new Set<Listener>();
+  private room: Room | null = null;
+  private queue: Json[] = [];
+  private waiters: { pred: (m: Json) => boolean; resolve: (m: Json) => void }[] = [];
 
   playerId = "";
   name = "";
-  me = { x: 0, y: 0 };
-  map: MapView = { id: "?", width: 0, height: 0 };
-  players = new Map<string, PlayerView>();
-  nodes = new Map<string, NodeView>();
   inventory: Inventory = {};
   chatLog: ChatLine[] = [];
 
   get connected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN && this.playerId !== "";
+    return this.room !== null && this.playerId !== "";
+  }
+
+  private get state(): Json {
+    if (!this.room) throw new Error("접속 상태가 아닙니다. join부터 하세요.");
+    return this.room.state as Json;
+  }
+
+  get me(): { x: number; y: number } {
+    const p = this.state.players.get(this.playerId);
+    if (!p) throw new Error("월드에 내 캐릭터가 없습니다");
+    return { x: p.x, y: p.y };
+  }
+
+  get map(): { id: string; width: number; height: number } {
+    return { id: this.state.mapId, width: this.state.width, height: this.state.height };
+  }
+
+  get nodes(): Map<string, NodeView> {
+    const out = new Map<string, NodeView>();
+    this.state.nodes.forEach((n: Json, id: string) => {
+      out.set(id, { id, kind: n.kind, x: n.x, y: n.y, remaining: n.remaining });
+    });
+    return out;
   }
 
   async connect(url: string, name: string): Promise<void> {
     if (this.connected) throw new Error(`이미 ${this.name}(으)로 접속 중입니다. leave 후 다시 시도하세요.`);
-    const ws = new WebSocket(url);
-    this.ws = ws;
-    await new Promise<void>((res, rej) => {
-      ws.once("open", () => res());
-      ws.once("error", (err) => rej(new Error(`서버 연결 실패 (${url}): ${err.message}`)));
-    });
-    ws.on("message", (data) => {
-      const msg = JSON.parse(data.toString()) as ServerMsg;
-      this.apply(msg);
-      for (const l of [...this.listeners]) l(msg);
-    });
-    ws.on("close", () => {
+    const token = loadTokens()[name];
+    let room: Room;
+    try {
+      room = await new Client(url).joinOrCreate(ROOM_NAME, { name, ...(token ? { token } : {}) });
+    } catch (err) {
+      throw new Error(`입장 실패 (${url}): ${(err as Error).message}`);
+    }
+    this.room = room;
+
+    for (const type of CAPTURED) {
+      room.onMessage(type, (payload: Json) => this.push({ type, ...payload }));
+    }
+    room.onLeave(() => {
+      this.room = null;
       this.playerId = "";
     });
 
-    const token = loadTokens()[name];
-    this.send({ type: "login", name, ...(token ? { token } : {}) });
-    const first = await this.waitFor((m) => m.type === "welcome" || m.type === "error", 10_000);
-    if (first.type === "error") {
-      ws.close();
-      throw new Error(`로그인 실패: ${first.code} — ${first.message}`);
-    }
+    const welcome = await new Promise<WelcomeMsg>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("welcome 대기 시간 초과")), 10_000);
+      room.onMessage("welcome", (w: WelcomeMsg) => {
+        clearTimeout(timer);
+        resolve(w);
+      });
+      room.send("hello");
+    });
+
+    this.playerId = welcome.playerId;
+    this.name = name;
+    this.inventory = welcome.inventory;
+    saveToken(name, welcome.token);
   }
 
   disconnect(): void {
-    this.ws?.close();
-    this.ws = null;
+    void this.room?.leave();
+    this.room = null;
     this.playerId = "";
-    this.players.clear();
-    this.nodes.clear();
   }
 
-  private apply(msg: ServerMsg): void {
-    switch (msg.type) {
-      case "welcome":
-        this.playerId = msg.playerId;
-        this.name = msg.you.name;
-        this.me = { x: msg.you.x, y: msg.you.y };
-        this.map = msg.map;
-        this.inventory = msg.inventory;
-        this.players = new Map(msg.players.map((p) => [p.id, p]));
-        this.nodes = new Map(msg.nodes.map((n) => [n.id, n]));
-        saveToken(msg.you.name, msg.token);
-        return;
-      case "state":
-        for (const p of msg.players) {
-          if (p.id === this.playerId) this.me = { x: p.x, y: p.y };
-          else {
-            const known = this.players.get(p.id);
-            if (known) {
-              known.x = p.x;
-              known.y = p.y;
-            }
-          }
-        }
-        return;
-      case "player_joined":
-        this.players.set(msg.player.id, msg.player);
-        return;
-      case "player_left":
-        this.players.delete(msg.id);
-        return;
-      case "node_update":
-        this.nodes.set(msg.node.id, msg.node);
-        return;
-      case "gather_result":
-        this.inventory = msg.inventory;
-        return;
-      case "chat":
-        this.chatLog.push({ name: msg.name, text: msg.text, t: msg.t });
-        if (this.chatLog.length > 30) this.chatLog.shift();
-        return;
-      default:
-        return;
+  send(type: string, payload?: object): void {
+    if (!this.room) throw new Error("접속 상태가 아닙니다. join부터 하세요.");
+    this.room.send(type, payload);
+  }
+
+  private push(msg: Json): void {
+    if (msg.type === "chat") {
+      this.chatLog.push({ name: msg.name, text: msg.text, t: msg.t });
+      if (this.chatLog.length > 30) this.chatLog.shift();
+      return;
     }
+    if (msg.type === "gather_result") this.inventory = msg.inventory;
+    const i = this.waiters.findIndex((w) => w.pred(msg));
+    if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(msg);
+    else this.queue.push(msg);
   }
 
-  send(msg: object): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error("접속 상태가 아닙니다. join부터 하세요.");
-    this.ws.send(JSON.stringify(msg));
-  }
-
-  waitFor(pred: (m: ServerMsg) => boolean, timeoutMs: number): Promise<ServerMsg> {
+  private expectMsg(pred: (m: Json) => boolean, timeoutMs: number): Promise<Json> {
+    const i = this.queue.findIndex(pred);
+    if (i >= 0) return Promise.resolve(this.queue.splice(i, 1)[0]!);
     return new Promise((resolve, reject) => {
-      const listener: Listener = (m) => {
-        if (!pred(m)) return;
-        this.listeners.delete(listener);
-        clearTimeout(timer);
-        resolve(m);
-      };
-      const timer = setTimeout(() => {
-        this.listeners.delete(listener);
-        reject(new Error("응답 대기 시간 초과"));
-      }, timeoutMs);
-      this.listeners.add(listener);
+      const timer = setTimeout(() => reject(new Error("응답 대기 시간 초과")), timeoutMs);
+      this.waiters.push({
+        pred,
+        resolve: (m) => {
+          clearTimeout(timer);
+          resolve(m);
+        },
+      });
     });
   }
 
-  /** 목표점으로 이동하고 도착(2px 이내)까지 대기. 서버 클램프를 로컬에서도 적용해 판정. */
+  private waitState(pred: () => boolean, timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (pred()) return resolve();
+      const start = Date.now();
+      const iv = setInterval(() => {
+        try {
+          if (pred()) {
+            clearInterval(iv);
+            resolve();
+          } else if (Date.now() - start > timeoutMs) {
+            clearInterval(iv);
+            reject(new Error("이동/상태 대기 시간 초과"));
+          }
+        } catch (err) {
+          clearInterval(iv);
+          reject(err as Error);
+        }
+      }, 50);
+    });
+  }
+
+  /** 목표점으로 이동하고 도착(2px 이내)까지 대기. 서버 클램프를 로컬에도 적용해 판정. */
   async goto(x: number, y: number, timeoutMs = 30_000): Promise<void> {
-    const tx = clamp(x, 0, this.map.width);
-    const ty = clamp(y, 0, this.map.height);
-    if (dist(this.me.x, this.me.y, tx, ty) <= 2) return;
-    this.send({ type: "move_to", x: tx, y: ty });
-    await this.waitFor(
-      (m) => m.type === "state" && dist(this.me.x, this.me.y, tx, ty) <= 2,
-      timeoutMs,
-    );
+    const tx = clamp(x, 0, this.state.width);
+    const ty = clamp(y, 0, this.state.height);
+    const near = () => dist(this.me.x, this.me.y, tx, ty) <= 2;
+    if (near()) return;
+    this.send("move_to", { x: tx, y: ty });
+    await this.waitState(near, timeoutMs);
   }
 
   /** 노드로 이동해 채집 1회. 결과 아이템을 반환. */
@@ -161,20 +172,17 @@ export class GameClient {
     if (node.remaining <= 0) throw new Error(`고갈된 노드: ${nodeId} (리스폰 대기 중)`);
     if (dist(this.me.x, this.me.y, node.x, node.y) > GAME.GATHER_RANGE) await this.goto(node.x, node.y);
 
-    this.send({ type: "gather", nodeId });
-    const started = await this.waitFor(
-      (m) =>
-        (m.type === "gather_started" || m.type === "gather_failed") && m.nodeId === nodeId,
+    this.send("gather", { nodeId });
+    const started = await this.expectMsg(
+      (m) => (m.type === "gather_started" || m.type === "gather_failed") && m.nodeId === nodeId,
       5000,
     );
     if (started.type === "gather_failed") throw new Error(`채집 거부: ${started.reason}`);
-    const result = await this.waitFor(
-      (m) =>
-        (m.type === "gather_result" || m.type === "gather_failed") && m.nodeId === nodeId,
+    const result = await this.expectMsg(
+      (m) => (m.type === "gather_result" || m.type === "gather_failed") && m.nodeId === nodeId,
       GAME.GATHER_MS + 5000,
     );
     if (result.type === "gather_failed") throw new Error(`채집 실패: ${result.reason}`);
-    if (result.type !== "gather_result") throw new Error("도달 불가");
     return { item: result.item, count: result.count };
   }
 
@@ -196,15 +204,15 @@ export class GameClient {
 
   /** LLM에게 보여줄 현재 상황 요약. */
   summary(): object {
+    const players: { name: string; x: number; y: number }[] = [];
+    this.state.players.forEach((p: Json) => {
+      players.push({ name: p.name, x: Math.round(p.x), y: Math.round(p.y) });
+    });
     return {
       me: { id: this.playerId, name: this.name, x: Math.round(this.me.x), y: Math.round(this.me.y) },
-      map: this.map,
+      map: { id: this.state.mapId, width: this.state.width, height: this.state.height },
       inventory: this.inventory,
-      players: [...this.players.values()].map((p) => ({
-        name: p.name,
-        x: Math.round(p.x),
-        y: Math.round(p.y),
-      })),
+      players,
       nodes: [...this.nodes.values()]
         .map((n) => ({
           id: n.id,

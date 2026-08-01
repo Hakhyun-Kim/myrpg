@@ -2,8 +2,8 @@
 
 경제·생활 중심 웹 MMORPG. 기획은 [docs/GDD.md](docs/GDD.md), 통신 규약은 [PROTOCOL.md](PROTOCOL.md).
 
-**봇도 시민이다** — 사람 클라이언트와 봇은 같은 WebSocket 프로토콜로 접속한다. 봇 전용 API는 없다.
-PROTOCOL.md만 읽고 봇을 만들 수 있으며, 그게 안 되면 버그다 (스모크 테스트가 검증).
+**봇도 시민이다** — 사람 클라이언트와 봇은 같은 Colyseus 룸에 같은 계약으로 접속한다. 봇 전용 API는 없다.
+PROTOCOL.md와 공식 SDK(colyseus.js)만으로 봇을 만들 수 있으며, 그게 안 되면 버그다 (스모크 테스트가 검증).
 
 ## 빠른 시작
 
@@ -25,7 +25,7 @@ npm run bot -- --name woodbot --loop
 AI가 `join / look / goto / gather / say` 도구로 직접 게임에 입장해 플레이할 수 있다.
 "woodbot이라는 이름으로 들어가서 나무 10개 캐줘"라고 말하면 된다.
 
-MCP 서버는 전용 API가 아니다 — 내부적으로 PROTOCOL.md의 WebSocket 프로토콜로 접속하는
+MCP 서버는 전용 API가 아니다 — 내부적으로 PROTOCOL.md의 룸 계약으로 접속하는
 또 하나의 클라이언트일 뿐이며(P6), 서버 판정이므로 사람보다 빠를 수 없다.
 
 테스트 / 타입체크:
@@ -46,9 +46,10 @@ npm start          # http://localhost:7777
 PROTOCOL.md          통신 규약 — 이 프로젝트의 헌법
 packages/
   protocol/          공유 타입·상수 (서버·클라 공용)
-  server/            권위 서버: 월드 시뮬(world.ts) + 네트워크(server.ts) + 스토리지 어댑터
+  server/            권위 서버: 월드 시뮬(world.ts) + Colyseus 룸(room.ts) + 스토리지 어댑터
   client/            Vite + Phaser 클라이언트
-  bot/               레퍼런스 봇 — 일부러 공유 패키지 없이 PROTOCOL.md만으로 작성
+  bot/               레퍼런스 봇 — colyseus.js로 PROTOCOL.md 계약만 보고 작성
+  mcp/               MCP 서버 — AI 에이전트를 게임 플레이어로 (join/look/goto/gather/say)
 ```
 
 ## 개발 수칙 (이식성)

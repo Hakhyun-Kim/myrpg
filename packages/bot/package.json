@@ -7,6 +7,7 @@
     "start": "tsx src/bot.ts"
   },
   "dependencies": {
+    "colyseus.js": "^0.15.28",
     "ws": "^8.18.0"
   },
   "devDependencies": {

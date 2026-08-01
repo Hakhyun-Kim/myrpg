@@ -8,7 +8,6 @@ export interface GameParams {
   gatherRange: number;
   nodeCapacity: number;
   nodeRespawnMs: number;
-  loginTimeoutMs: number;
   rateLimitPerSec: number;
 }
 
@@ -29,7 +28,6 @@ export function defaultGameParams(): GameParams {
     gatherRange: GAME.GATHER_RANGE,
     nodeCapacity: GAME.NODE_CAPACITY,
     nodeRespawnMs: GAME.NODE_RESPAWN_MS,
-    loginTimeoutMs: GAME.LOGIN_TIMEOUT_MS,
     rateLimitPerSec: GAME.RATE_LIMIT_PER_SEC,
   };
 }

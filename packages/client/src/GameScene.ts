@@ -1,15 +1,30 @@
 import Phaser from "phaser";
+import type { Room } from "colyseus.js";
 import {
   GAME,
   dist,
+  type ChatMsg,
+  type GatherFailedMsg,
+  type GatherResultMsg,
+  type GatherStartedMsg,
   type Inventory,
-  type NodeView,
-  type PlayerView,
-  type ServerMsg,
+  type WelcomeMsg,
 } from "@myrpg/protocol";
-import type { Connection } from "./net.js";
 
-type Welcome = Extract<ServerMsg, { type: "welcome" }>;
+// 서버 스키마의 클라이언트 측 투영 (colyseus.js 리플렉션 인스턴스)
+interface PlayerState {
+  name: string;
+  x: number;
+  y: number;
+  onChange(cb: () => void): () => void;
+}
+interface NodeState {
+  kind: string;
+  x: number;
+  y: number;
+  remaining: number;
+  onChange(cb: () => void): () => void;
+}
 
 const NODE_COLOR: Record<string, number> = { tree: 0x2e7d32, rock: 0x78909c, herb: 0xab47bc };
 const NODE_LABEL: Record<string, string> = { tree: "나무", rock: "바위", herb: "약초" };
@@ -23,93 +38,96 @@ interface PlayerSprite {
 }
 
 interface NodeSprite {
-  view: NodeView;
+  state: NodeState;
   circle: Phaser.GameObjects.Arc;
   label: Phaser.GameObjects.Text;
 }
 
 export class GameScene extends Phaser.Scene {
-  private conn!: Connection;
-  private welcome!: Welcome;
+  private room!: Room;
+  private welcome!: WelcomeMsg;
   private players = new Map<string, PlayerSprite>();
   private nodes = new Map<string, NodeSprite>();
   private pendingGather: string | null = null;
   private progress: Phaser.GameObjects.Rectangle | null = null;
+  private joinedAt = 0;
 
   constructor() {
     super("game");
   }
 
-  init(data: { conn: Connection; welcome: Welcome }): void {
-    this.conn = data.conn;
+  init(data: { room: Room; welcome: WelcomeMsg }): void {
+    this.room = data.room;
     this.welcome = data.welcome;
   }
 
   create(): void {
-    const { map } = this.welcome;
-    this.cameras.main.setBounds(0, 0, map.width, map.height);
-    this.physics?.world?.setBounds(0, 0, map.width, map.height);
-    this.drawGround(map.width, map.height);
+    this.joinedAt = Date.now();
+    const state = this.room.state as {
+      width: number;
+      height: number;
+      players: {
+        onAdd(cb: (p: PlayerState, id: string) => void, triggerAll?: boolean): void;
+        onRemove(cb: (p: PlayerState, id: string) => void): void;
+      };
+      nodes: { onAdd(cb: (n: NodeState, id: string) => void, triggerAll?: boolean): void };
+    };
 
-    for (const n of this.welcome.nodes) this.upsertNode(n);
-    this.addPlayer(this.welcome.you, true);
-    for (const p of this.welcome.players) this.addPlayer(p, false);
+    this.cameras.main.setBounds(0, 0, state.width, state.height);
+    this.drawGround(state.width, state.height);
     renderInventory(this.welcome.inventory);
 
-    const me = this.players.get(this.welcome.playerId);
-    if (me) this.cameras.main.startFollow(me.rect, true, 0.15, 0.15);
-
-    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      const wx = pointer.worldX;
-      const wy = pointer.worldY;
-      const node = this.nodeAt(wx, wy);
-      if (node && node.view.remaining > 0) {
-        this.pendingGather = node.view.id;
-        this.conn.send({ type: "move_to", x: node.view.x, y: node.view.y });
-        this.tryGatherIfNear();
-      } else {
-        this.pendingGather = null;
-        this.conn.send({ type: "move_to", x: wx, y: wy });
-      }
-    });
-
-    this.wireNet();
-  }
-
-  private wireNet(): void {
-    this.conn.on("state", (msg) => {
-      for (const mv of msg.players) {
-        const sprite = this.players.get(mv.id);
+    state.players.onAdd((p, id) => {
+      this.addPlayer(id, p);
+      if (id !== this.welcome.playerId && Date.now() - this.joinedAt > 1000)
+        pushChat(`${p.name} 님이 입장했습니다`, true);
+      p.onChange(() => {
+        const sprite = this.players.get(id);
         if (sprite) {
-          sprite.x = mv.x;
-          sprite.y = mv.y;
+          sprite.x = p.x;
+          sprite.y = p.y;
         }
-      }
-      this.tryGatherIfNear();
-    });
-    this.conn.on("player_joined", (msg) => {
-      this.addPlayer(msg.player, false);
-      pushChat(`${msg.player.name} 님이 입장했습니다`, true);
-    });
-    this.conn.on("player_left", (msg) => {
-      const sprite = this.players.get(msg.id);
+        if (id === this.welcome.playerId) this.tryGatherIfNear();
+      });
+    }, true);
+    state.players.onRemove((_p, id) => {
+      const sprite = this.players.get(id);
       if (sprite) {
         sprite.rect.destroy();
         sprite.label.destroy();
-        this.players.delete(msg.id);
+        this.players.delete(id);
       }
     });
-    this.conn.on("chat", (msg) => pushChat(`${msg.name}: ${msg.text}`, false));
-    this.conn.on("node_update", (msg) => this.upsertNode(msg.node));
-    this.conn.on("gather_started", (msg) => this.showProgress(msg.endsAt));
-    this.conn.on("gather_result", (msg) => {
+    state.nodes.onAdd((n, id) => {
+      this.upsertNode(id, n);
+      n.onChange(() => this.upsertNode(id, n));
+    }, true);
+
+    this.room.onMessage<ChatMsg>("chat", (msg) => pushChat(`${msg.name}: ${msg.text}`, false));
+    this.room.onMessage<GatherStartedMsg>("gather_started", (msg) => this.showProgress(msg.endsAt));
+    this.room.onMessage<GatherResultMsg>("gather_result", (msg) => {
       this.hideProgress();
       renderInventory(msg.inventory);
       pushChat(`${ITEM_LABEL[msg.item] ?? msg.item} +${msg.count}`, true);
     });
-    this.conn.on("gather_failed", (msg) => {
+    this.room.onMessage<GatherFailedMsg>("gather_failed", (msg) => {
       this.hideProgress();
       if (msg.reason !== "moved") pushChat(`채집 실패: ${msg.reason}`, true);
+    });
+
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      const wx = pointer.worldX;
+      const wy = pointer.worldY;
+      const nodeId = this.nodeAt(wx, wy);
+      const node = nodeId ? this.nodes.get(nodeId) : null;
+      if (nodeId && node && node.state.remaining > 0) {
+        this.pendingGather = nodeId;
+        this.room.send("move_to", { x: node.state.x, y: node.state.y });
+        this.tryGatherIfNear();
+      } else {
+        this.pendingGather = null;
+        this.room.send("move_to", { x: wx, y: wy });
+      }
     });
   }
 
@@ -119,7 +137,6 @@ export class GameScene extends Phaser.Scene {
       sprite.rect.x += (sprite.x - sprite.rect.x) * 0.3;
       sprite.rect.y += (sprite.y - sprite.rect.y) * 0.3;
       sprite.label.setPosition(sprite.rect.x, sprite.rect.y - 22);
-      sprite.label.setOrigin(0.5, 1);
     }
     if (this.progress) {
       const me = this.players.get(this.welcome.playerId);
@@ -132,8 +149,8 @@ export class GameScene extends Phaser.Scene {
     const me = this.players.get(this.welcome.playerId);
     const node = this.nodes.get(this.pendingGather);
     if (!me || !node) return;
-    if (dist(me.x, me.y, node.view.x, node.view.y) <= GAME.GATHER_RANGE) {
-      this.conn.send({ type: "gather", nodeId: this.pendingGather });
+    if (dist(me.x, me.y, node.state.x, node.state.y) <= GAME.GATHER_RANGE) {
+      this.room.send("gather", { nodeId: this.pendingGather });
       this.pendingGather = null;
     }
   }
@@ -149,33 +166,35 @@ export class GameScene extends Phaser.Scene {
     g.strokeRect(0, 0, w, h);
   }
 
-  private addPlayer(p: PlayerView, isMe: boolean): void {
-    if (this.players.has(p.id)) return;
+  private addPlayer(id: string, p: PlayerState): void {
+    if (this.players.has(id)) return;
+    const isMe = id === this.welcome.playerId;
     const rect = this.add.rectangle(p.x, p.y, 20, 26, isMe ? 0x66bb6a : 0x64b5f6).setStrokeStyle(2, 0x1a1a24);
     const label = this.add
       .text(p.x, p.y - 22, p.name, { fontSize: "12px", color: isMe ? "#a5d6a7" : "#bbdefb" })
       .setOrigin(0.5, 1);
-    this.players.set(p.id, { rect, label, x: p.x, y: p.y });
+    this.players.set(id, { rect, label, x: p.x, y: p.y });
+    if (isMe) this.cameras.main.startFollow(rect, true, 0.15, 0.15);
   }
 
-  private upsertNode(view: NodeView): void {
-    let sprite = this.nodes.get(view.id);
+  private upsertNode(id: string, n: NodeState): void {
+    let sprite = this.nodes.get(id);
     if (!sprite) {
-      const circle = this.add.circle(view.x, view.y, 14, NODE_COLOR[view.kind] ?? 0xffffff);
+      const circle = this.add.circle(n.x, n.y, 14, NODE_COLOR[n.kind] ?? 0xffffff);
       circle.setStrokeStyle(2, 0x111118);
       const label = this.add
-        .text(view.x, view.y + 18, "", { fontSize: "11px", color: "#ccc" })
+        .text(n.x, n.y + 18, "", { fontSize: "11px", color: "#ccc" })
         .setOrigin(0.5, 0);
-      sprite = { view, circle, label };
-      this.nodes.set(view.id, sprite);
+      sprite = { state: n, circle, label };
+      this.nodes.set(id, sprite);
     }
-    sprite.view = view;
-    sprite.circle.setAlpha(view.remaining > 0 ? 1 : 0.25);
-    sprite.label.setText(`${NODE_LABEL[view.kind] ?? view.kind} ${view.remaining}`);
+    sprite.state = n;
+    sprite.circle.setAlpha(n.remaining > 0 ? 1 : 0.25);
+    sprite.label.setText(`${NODE_LABEL[n.kind] ?? n.kind} ${n.remaining}`);
   }
 
-  private nodeAt(x: number, y: number): NodeSprite | null {
-    for (const s of this.nodes.values()) if (dist(x, y, s.view.x, s.view.y) <= 24) return s;
+  private nodeAt(x: number, y: number): string | null {
+    for (const [id, s] of this.nodes) if (dist(x, y, s.state.x, s.state.y) <= 24) return id;
     return null;
   }
 
