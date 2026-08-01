@@ -26,6 +26,8 @@ mcp.tool(
   { name: z.string().regex(GAME.NAME_RE).describe("캐릭터 이름 (2~16자, 한글/영문/숫자/_/-)") },
   async ({ name }) => {
     try {
+      if (client.connected && client.name === name) return ok(client.summary()); // 이미 접속 중 — 멱등
+      if (client.connected) client.disconnect();
       await client.connect(SERVER_URL, name);
       return ok(client.summary());
     } catch (err) {
@@ -40,7 +42,7 @@ mcp.tool(
   {},
   async () => {
     try {
-      if (!client.connected) throw new Error("접속 상태가 아닙니다. join부터 하세요.");
+      await client.ensureConnected();
       return ok(client.summary());
     } catch (err) {
       return fail(err);
@@ -54,6 +56,7 @@ mcp.tool(
   { x: z.number().describe("목표 x (픽셀)"), y: z.number().describe("목표 y (픽셀)") },
   async ({ x, y }) => {
     try {
+      await client.ensureConnected();
       await client.goto(x, y);
       return ok({ arrived: { x: Math.round(client.me.x), y: Math.round(client.me.y) } });
     } catch (err) {
@@ -72,6 +75,7 @@ mcp.tool(
   },
   async ({ nodeId, kind, times }) => {
     try {
+      await client.ensureConnected();
       const n = times ?? 1;
       const got: Record<string, number> = {};
       for (let i = 0; i < n; i++) {
@@ -94,7 +98,8 @@ mcp.tool(
   { text: z.string().min(1).max(GAME.MAX_CHAT_LEN) },
   async ({ text }) => {
     try {
-      client.send({ type: "chat", text });
+      await client.ensureConnected();
+      client.send("chat", { text });
       return ok("전송됨");
     } catch (err) {
       return fail(err);

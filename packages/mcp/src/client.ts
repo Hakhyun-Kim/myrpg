@@ -34,6 +34,7 @@ export class GameClient {
   name = "";
   inventory: Inventory = {};
   chatLog: ChatLine[] = [];
+  private lastUrl = "";
 
   get connected(): boolean {
     return this.room !== null && this.playerId !== "";
@@ -92,8 +93,26 @@ export class GameClient {
 
     this.playerId = welcome.playerId;
     this.name = name;
+    this.lastUrl = url;
     this.inventory = welcome.inventory;
     saveToken(name, welcome.token);
+  }
+
+  /**
+   * 연결 보장 — MCP 프로세스는 툴 호출 사이에 오래 유휴 상태일 수 있어
+   * 그 사이 서버가 연결을 끊었을 수 있다. 죽어 있으면 같은 이름·토큰으로 조용히 재입장한다.
+   * (서버가 계정을 영속하므로 인벤토리·위치는 이어진다)
+   */
+  async ensureConnected(): Promise<void> {
+    // 유휴 중 밀려 있던 close 이벤트가 있다면 먼저 처리되게 한 틱 양보
+    await new Promise((r) => setImmediate(r));
+    if (this.connected) return;
+    if (!this.lastUrl || !this.name) throw new Error("접속 상태가 아닙니다. join부터 하세요.");
+    this.room = null;
+    this.playerId = "";
+    this.queue.length = 0;
+    this.waiters.length = 0;
+    await this.connect(this.lastUrl, this.name);
   }
 
   disconnect(): void {

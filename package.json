@@ -14,7 +14,7 @@
     "start": "npm -w @myrpg/server run start",
     "bot": "npm -w @myrpg/bot run start --",
     "test": "npm -w @myrpg/server run test",
-    "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck"
+    "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck && npm -w @myrpg/mcp run typecheck"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
