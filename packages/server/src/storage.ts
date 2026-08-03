@@ -2,6 +2,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Inventory } from "@myrpg/protocol";
+// 타입 전용 순환 참조 (런타임에는 지워진다) — 시장 데이터의 정의는 market.ts가 소유한다
+import type { MarketData } from "./market.js";
 
 export interface CraftJob {
   id: string;
@@ -9,6 +11,11 @@ export interface CraftJob {
   total: number;
   done: number; // ready로 옮겨진 수
   startAt: number; // 현재 진행 중인 유닛의 시작 시각 (Unix ms) — 오프라인 진행의 근거
+}
+
+export interface SkillState {
+  level: number;
+  xp: number; // 현재 레벨에서 누적한 xp
 }
 
 export interface Account {
@@ -19,11 +26,17 @@ export interface Account {
   inventory: Inventory;
   jobs?: CraftJob[]; // 제작 큐 (구버전 세이브 호환 위해 optional)
   ready?: Inventory; // 완료품 보관함
+  silver?: number; // 은화 (Phase 2)
+  skills?: Record<string, SkillState>; // 생활 스킬
+  npcSold?: { day: number; count: number }; // NPC 매입 일일 한도 추적
+  upkeepDay?: number; // 유지비를 마지막으로 낸 일차
+  toolUses?: number; // 현재 도구의 사용 횟수
 }
 
 export interface SaveData {
   version: 1;
   accounts: Record<string, Account>;
+  market?: MarketData; // 위탁 거래소 (Phase 2)
 }
 
 export interface Storage {

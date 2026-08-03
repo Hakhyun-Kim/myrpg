@@ -8,11 +8,23 @@ import { z } from "zod";
 // colyseus는 CJS 전용 배포라 Node ESM에서 named import가 깨진다 — require로 가져온다
 const require = createRequire(import.meta.url);
 const { Room, ServerError } = require("colyseus") as typeof import("colyseus");
-import { GAME, PROTOCOL_VERSION, type JoinOptions, type WelcomeMsg } from "@myrpg/protocol";
-import { claim, queueView, tryCraft } from "./craft.js";
+import {
+  CRAFT_SKILL,
+  GAME,
+  NODE_SKILL,
+  PROTOCOL_VERSION,
+  RECIPES,
+  type FillEvent,
+  type JoinOptions,
+  type WelcomeMsg,
+} from "@myrpg/protocol";
+import { claim, queueView, settle, tryCraft } from "./craft.js";
 import { TradeManager } from "./trade.js";
+import { emptyMarket, Market } from "./market.js";
+import { addXp, bonusYield, skillsView } from "./skills.js";
+import { useToolForGather } from "./tools.js";
 import type { ServerConfig } from "./config.js";
-import type { SaveData, Storage } from "./storage.js";
+import type { Account, SaveData, Storage } from "./storage.js";
 import { SPAWN, World, type WorldEvent } from "./world.js";
 import { HaranState, NodeSchema, PlayerSchema } from "./schema.js";
 
@@ -38,6 +50,19 @@ const craftSchema = z.object({
   recipeId: z.string().max(64),
   count: z.number().int().min(1).max(GAME.CRAFT_MAX_COUNT),
 });
+const marketOrderSchema = z.object({
+  side: z.enum(["buy", "sell"]),
+  item: z.string().max(64),
+  price: z.number().int().min(1).max(1_000_000),
+  qty: z.number().int().min(1).max(9999),
+});
+const marketCancelSchema = z.object({ orderId: z.string().max(64) });
+const marketBookSchema = z.object({ item: z.string().max(64) });
+const npcTradeSchema = z.object({
+  side: z.enum(["buy", "sell"]),
+  item: z.string().max(64),
+  qty: z.number().int().min(1).max(9999),
+});
 const tradeRequestSchema = z.object({ playerId: z.string().max(64) });
 const tradeRespondSchema = z.object({ accept: z.boolean() });
 const tradeOfferSchema = z.object({
@@ -53,6 +78,7 @@ export class HaranRoom extends Room<HaranState> {
   private byPlayerId = new Map<string, Client>();
   private buckets = new Map<string, { start: number; count: number }>();
   private trades!: TradeManager;
+  private market!: Market;
 
   onCreate(options: { deps: RoomDeps }): void {
     this.deps = options.deps;
@@ -70,6 +96,9 @@ export class HaranRoom extends Room<HaranState> {
       state.nodes.set(n.id, new NodeSchema(n.kind, n.x, n.y, n.remaining));
     }
     this.setState(state);
+
+    if (!this.deps.save.market) this.deps.save.market = emptyMarket();
+    this.market = new Market(this.deps.save, this.deps.save.market);
 
     this.trades = new TradeManager(
       {
@@ -140,6 +169,7 @@ export class HaranRoom extends Room<HaranState> {
         client.send("craft_failed", { recipeId: String((raw as { recipeId?: unknown })?.recipeId ?? "?"), reason: "bad_count" });
         return;
       }
+      this.settleCraft(account, Date.now());
       const r = tryCraft(account, msg.data.recipeId, msg.data.count, Date.now(), config.game);
       if (!r.ok) {
         client.send("craft_failed", { recipeId: msg.data.recipeId, reason: r.reason });
@@ -151,15 +181,82 @@ export class HaranRoom extends Room<HaranState> {
     this.onMessage("queue", (client) => {
       if (!this.allow(client)) return;
       const account = this.accountOf(client);
-      if (account) client.send("queue_state", queueView(account, Date.now(), config.game));
+      if (!account) return;
+      this.settleCraft(account, Date.now());
+      client.send("queue_state", queueView(account, Date.now(), config.game));
     });
     this.onMessage("claim", (client) => {
       if (!this.allow(client)) return;
       const account = this.accountOf(client);
       if (!account) return;
-      const claimed = claim(account, Date.now(), config.game);
+      const now = Date.now();
+      this.settleCraft(account, now);
+      const claimed = claim(account, now, config.game);
+      this.syncInventory(account);
       client.send("claim_result", { claimed, inventory: { ...account.inventory } });
-      client.send("queue_state", queueView(account, Date.now(), config.game));
+      client.send("queue_state", queueView(account, now, config.game));
+      client.send("skills", skillsView(account));
+    });
+
+    // ---- 위탁 거래소 (PROTOCOL.md §9) ----
+    this.onMessage("market_book", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = marketBookSchema.safeParse(raw);
+      if (!msg.success) return client.send("market_failed", { reason: "unknown_item" });
+      client.send("market_book", this.market.book(msg.data.item, Date.now()));
+    });
+    this.onMessage("market_order", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = marketOrderSchema.safeParse(raw);
+      const account = this.accountOf(client);
+      if (!account) return;
+      if (!msg.success) return client.send("market_failed", { reason: "bad_price" });
+      const now = Date.now();
+      const { side, item, price, qty } = msg.data;
+      const r = this.market.place(account, side, item, price, qty, now);
+      if (!r.ok) return client.send("market_failed", { reason: r.reason });
+      this.syncInventory(account);
+      this.notifyFills(client, account, r.mine);
+      for (const [owner, fills] of r.others) this.notifyOwner(owner, fills);
+      client.send("my_orders", { orders: this.market.myOrders(account.name, now), silver: account.silver ?? 0 });
+    });
+    this.onMessage("market_cancel", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = marketCancelSchema.safeParse(raw);
+      const account = this.accountOf(client);
+      if (!account) return;
+      if (!msg.success) return client.send("market_failed", { reason: "not_found" });
+      const now = Date.now();
+      const r = this.market.cancel(account, msg.data.orderId, now);
+      if (!r.ok) return client.send("market_failed", { reason: r.reason });
+      this.syncInventory(account);
+      client.send("inventory", { inventory: { ...account.inventory }, silver: account.silver ?? 0 });
+      client.send("my_orders", { orders: this.market.myOrders(account.name, now), silver: account.silver ?? 0 });
+    });
+    this.onMessage("my_orders", (client) => {
+      if (!this.allow(client)) return;
+      const account = this.accountOf(client);
+      if (!account) return;
+      client.send("my_orders", {
+        orders: this.market.myOrders(account.name, Date.now()),
+        silver: account.silver ?? 0,
+      });
+    });
+    this.onMessage("npc_trade", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = npcTradeSchema.safeParse(raw);
+      const account = this.accountOf(client);
+      if (!account) return;
+      if (!msg.success) return client.send("market_failed", { reason: "bad_qty" });
+      const r = this.market.npcTrade(account, msg.data.side, msg.data.item, msg.data.qty, Date.now());
+      if (!r.ok) return client.send("market_failed", { reason: r.reason });
+      this.syncInventory(account);
+      client.send("inventory", { inventory: { ...account.inventory }, silver: account.silver ?? 0 });
+    });
+    this.onMessage("skills", (client) => {
+      if (!this.allow(client)) return;
+      const account = this.accountOf(client);
+      if (account) client.send("skills", skillsView(account));
     });
 
     // ---- 대면 거래 (PROTOCOL.md §8) ----
@@ -213,6 +310,8 @@ export class HaranRoom extends Room<HaranState> {
         x: SPAWN.x,
         y: SPAWN.y,
         inventory: {},
+        silver: 500, // 신규 지참금 — 시장 진입용 (Faucet, 계정당 1회)
+        skills: {},
       };
       save.accounts[name] = account;
     }
@@ -258,12 +357,17 @@ export class HaranRoom extends Room<HaranState> {
     if (now - this.lastCraftCheck >= 1000) {
       this.lastCraftCheck = now;
       this.trades.tick(now); // 거래 요청 만료·거리 이탈 점검
+      this.market.expire(now); // 만료 주문 정산 (에스크로 환급)
       for (const client of this.byPlayerId.values()) {
         const account = this.accountOf(client);
         if (!account?.jobs?.length) continue;
         const ms = this.deps.config.game.craftMsT1;
         const due = account.jobs.some((j) => now >= j.startAt + ms);
-        if (due) client.send("queue_state", queueView(account, now, this.deps.config.game));
+        if (due) {
+          this.settleCraft(account, now);
+          client.send("queue_state", queueView(account, now, this.deps.config.game));
+          client.send("skills", skillsView(account));
+        }
       }
     }
   }
@@ -282,11 +386,33 @@ export class HaranRoom extends Room<HaranState> {
       case "gather_done": {
         const client = this.byPlayerId.get(ev.playerId);
         const p = this.world.players.get(ev.playerId);
-        if (client && p)
+        if (!p) return;
+        const account = this.deps.save.accounts[p.name];
+        let count = ev.count;
+        if (account) {
+          const kind = this.world.nodes.get(ev.nodeId)?.kind;
+          const skill = kind ? NODE_SKILL[kind] : undefined;
+          if (skill) {
+            // 도구 소모 + 스킬 보너스 — 서버 판정 (봇도 사람도 동일)
+            const tool = useToolForGather(account);
+            const bonus = bonusYield(account, skill, Math.random);
+            const total = Math.max(1, Math.floor((ev.count + bonus) * tool.multiplier));
+            const delta = total - ev.count;
+            if (delta !== 0) {
+              p.inventory[ev.item] = Math.max(0, (p.inventory[ev.item] ?? 0) + delta);
+              if (p.inventory[ev.item] === 0) delete p.inventory[ev.item];
+              count = total;
+            }
+            if (tool.consumed && client) client.send("tool_broken", { item: GAME.TOOL_ITEM });
+            const levels = addXp(account, skill, GAME.XP_GATHER);
+            if (levels > 0 && client) client.send("skills", skillsView(account));
+          }
+        }
+        if (client)
           client.send("gather_result", {
             nodeId: ev.nodeId,
             item: ev.item,
-            count: ev.count,
+            count,
             inventory: { ...p.inventory },
           });
         return;
@@ -309,18 +435,62 @@ export class HaranRoom extends Room<HaranState> {
     const ud = client.userData as UserData;
     const account = this.deps.save.accounts[ud.accountName]!;
     const p = this.world.players.get(ud.playerId);
+    const now = Date.now();
+    this.settleCraft(account, now);
+    this.market.chargeUpkeep(account, now); // 일일 유지비 — 접속 시점 정산
+    this.market.refreshContracts(now, Math.max(4, this.byPlayerId.size));
     return {
       protocol: PROTOCOL_VERSION,
       playerId: ud.playerId,
       token: account.token,
       inventory: { ...(p?.inventory ?? account.inventory) },
-      queue: queueView(account, Date.now(), this.deps.config.game),
+      silver: account.silver ?? 0,
+      queue: queueView(account, now, this.deps.config.game),
+      skills: skillsView(account),
+      orders: this.market.myOrders(account.name, now),
     };
   }
 
-  private accountOf(client: Client): (typeof this.deps.save.accounts)[string] | null {
+  /** 제작 큐 정산 + 완성분 경험치. 큐를 읽는 모든 경로에서 먼저 호출한다. */
+  private settleCraft(account: Account, now: number): void {
+    const completed = settle(account, now, this.deps.config.game);
+    for (const [recipeId, units] of Object.entries(completed)) {
+      const skill = CRAFT_SKILL[RECIPES[recipeId]?.skill ?? ""];
+      if (skill) addXp(account, skill, units * GAME.XP_CRAFT_UNIT);
+    }
+  }
+
+  private accountOf(client: Client): Account | null {
     const ud = client.userData as UserData | undefined;
     return ud ? (this.deps.save.accounts[ud.accountName] ?? null) : null;
+  }
+
+  private playerIdOf(accountName: string): string {
+    return "p_" + Buffer.from(accountName).toString("hex").slice(0, 12);
+  }
+
+  /** 시장·거래가 account.inventory를 바꾼 뒤 월드 플레이어와 참조를 다시 묶는다. */
+  private syncInventory(account: Account): void {
+    const p = this.world.players.get(this.playerIdOf(account.name));
+    if (p) p.inventory = account.inventory;
+  }
+
+  private notifyFills(client: Client, account: Account, fills: FillEvent[]): void {
+    if (fills.length === 0) return;
+    client.send("market_fills", {
+      fills,
+      silver: account.silver ?? 0,
+      inventory: { ...account.inventory },
+    });
+  }
+
+  /** 상대(메이커) 쪽 체결 통지 — 접속 중이면 즉시, 아니면 다음 접속 시 my_orders로 확인한다. */
+  private notifyOwner(accountName: string, fills: FillEvent[]): void {
+    const account = this.deps.save.accounts[accountName];
+    if (!account) return;
+    this.syncInventory(account);
+    const client = this.byPlayerId.get(this.playerIdOf(accountName));
+    if (client) this.notifyFills(client, account, fills);
   }
 
   private playerOf(client: Client) {

@@ -31,6 +31,11 @@ AI가 `join / look / goto / gather / say` 도구로 직접 게임에 입장해 �
 MCP 서버는 전용 API가 아니다 — 내부적으로 PROTOCOL.md의 룸 계약으로 접속하는
 또 하나의 클라이언트일 뿐이며(P6), 서버 판정이므로 사람보다 빠를 수 없다.
 
+경제 시뮬레이션 (Phase 2 게이트 — 봇 N명 × M일을 수초에 압축):
+```bash
+npm run sim -- --bots 20 --days 7
+```
+
 테스트 / 타입체크:
 ```bash
 npm test

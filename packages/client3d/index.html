@@ -24,7 +24,7 @@
       #inv { position: absolute; top: 12px; right: 12px; background: rgba(16,20,28,.8); border: 1px solid #3a4356;
         border-radius: 10px; padding: 10px 14px; min-width: 140px; font-size: 13px; backdrop-filter: blur(4px); }
       #inv h2 { margin: 0 0 6px; font-size: 12px; color: #e6c76a; }
-      #craft { position: absolute; top: 160px; right: 12px; background: rgba(16,20,28,.8); border: 1px solid #3a4356;
+      #craft { position: absolute; top: 200px; right: 12px; background: rgba(16,20,28,.8); border: 1px solid #3a4356;
         border-radius: 10px; padding: 10px 14px; width: 200px; font-size: 12px; pointer-events: auto; backdrop-filter: blur(4px); }
       #craft h2 { margin: 0 0 6px; font-size: 12px; color: #e6c76a; }
       #craft .recipe { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
@@ -57,6 +57,31 @@
       #trade-req button { border: 0; border-radius: 5px; padding: 3px 10px; margin-left: 6px; cursor: pointer; }
       #trade-req-yes { background: #e6c76a; }
       #trade-req-no { background: #3a4356; color: #eee; }
+      #silver { position: absolute; top: 12px; right: 162px; background: rgba(16,20,28,.8);
+        border: 1px solid #3a4356; border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #e6c76a;
+        backdrop-filter: blur(4px); }
+      #market-toggle { position: absolute; top: 50px; right: 162px; pointer-events: auto; border: 0;
+        border-radius: 6px; background: #e6c76a; color: #10141c; font-weight: bold; padding: 5px 10px; cursor: pointer; }
+      #skills-box { position: absolute; top: 88px; right: 162px; background: rgba(16,20,28,.8);
+        border: 1px solid #3a4356; border-radius: 10px; padding: 8px 12px; font-size: 11px; width: 156px;
+        backdrop-filter: blur(4px); }
+      #skills-box h2 { margin: 0 0 4px; font-size: 11px; color: #e6c76a; }
+      #market { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+        background: rgba(16,20,28,.96); border: 1px solid #e6c76a; border-radius: 12px; padding: 14px 18px;
+        width: 440px; font-size: 12px; pointer-events: auto; z-index: 9; backdrop-filter: blur(6px); }
+      #market h2 { margin: 0 0 8px; font-size: 13px; color: #e6c76a; display: flex; justify-content: space-between; }
+      #market select, #market input { background: #1a2130; color: #eee; border: 1px solid #3a4356;
+        border-radius: 5px; padding: 4px; }
+      #market input { width: 62px; }
+      #market button { border: 0; border-radius: 6px; padding: 4px 10px; cursor: pointer; background: #3a4356; color: #eee; }
+      #market-buy { background: #4f8a5f !important; }
+      #market-sell { background: #8a5f5f !important; }
+      #market .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+      #market .bookcols { display: flex; gap: 20px; }
+      #market .bookcols > div { flex: 1; }
+      #market .muted { color: #8a94a6; margin-top: 4px; }
+      #market-book, #market-orders { border-top: 1px solid #3a4356; padding-top: 6px; margin-top: 6px; }
+      #market-orders button { padding: 1px 6px; font-size: 10px; }
       #chatlog { position: absolute; left: 12px; bottom: 50px; width: 340px; max-height: 190px; overflow: hidden;
         display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px; text-shadow: 0 1px 3px #000; }
       #chatlog div { padding: 1px 4px; }
@@ -84,6 +109,25 @@
       <div id="hud">
         <div id="hint">클릭: 이동 · 자원 클릭: 채집 · 휠: 줌 · Enter: 채팅</div>
         <div id="inv"><h2>가방</h2><div id="inv-items">비어 있음</div></div>
+        <div id="silver">0 은화</div>
+        <button id="market-toggle">시장</button>
+        <div id="skills-box"><h2>생활 스킬</h2><div id="skills-list"></div></div>
+        <div id="market">
+          <h2>위탁 거래소 <button id="market-close">닫기</button></h2>
+          <div class="row">
+            <select id="market-item"></select>
+            가격 <input id="market-price" type="number" min="1" value="5" />
+            수량 <input id="market-qty" type="number" min="1" value="1" />
+          </div>
+          <div class="row">
+            <button id="market-buy">매수 등록</button>
+            <button id="market-sell">매도 등록</button>
+            <button id="npc-buy">NPC 구매</button>
+            <button id="npc-sell">NPC 판매</button>
+          </div>
+          <div id="market-book"></div>
+          <div id="market-orders"></div>
+        </div>
         <div id="craft">
           <h2>제작 큐</h2>
           <div id="craft-recipes"></div>

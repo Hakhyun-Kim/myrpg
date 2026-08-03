@@ -38,6 +38,11 @@ const CAPTURED = [
   "trade_done",
   "trade_closed",
   "trade_failed",
+  "market_book",
+  "market_fills",
+  "market_failed",
+  "my_orders",
+  "skills",
 ] as const;
 
 export class GameClient {
@@ -51,6 +56,8 @@ export class GameClient {
   chatLog: ChatLine[] = [];
   activeTrade: { partner: { id: string; name: string }; update: Json | null } | null = null;
   pendingRequest: { from: string; name: string } | null = null; // 나에게 온 거래 요청
+  silver = 0;
+  skills: Json | null = null;
   private lastUrl = "";
 
   get connected(): boolean {
@@ -112,6 +119,8 @@ export class GameClient {
     this.name = name;
     this.lastUrl = url;
     this.inventory = welcome.inventory;
+    this.silver = welcome.silver ?? 0;
+    this.skills = welcome.skills ?? null;
     saveToken(name, welcome.token);
   }
 
@@ -156,6 +165,8 @@ export class GameClient {
       msg.type === "trade_done"
     )
       this.inventory = msg.inventory;
+    if (typeof msg.silver === "number") this.silver = msg.silver;
+    if (msg.type === "skills") this.skills = msg;
     if (msg.type === "trade_requested") this.pendingRequest = { from: msg.from, name: msg.name };
     if (msg.type === "trade_open") this.activeTrade = { partner: msg.partner, update: null };
     if (msg.type === "trade_update" && this.activeTrade) this.activeTrade.update = msg;
@@ -263,6 +274,50 @@ export class GameClient {
     return this.expectMsg((m) => m.type === "claim_result", 5000);
   }
 
+  // ---- 시장 ----
+
+  /** 호가창 + 기준가 + NPC 가격. */
+  async marketBook(item: string): Promise<Json> {
+    this.dropQueued("market_book", "market_failed");
+    this.send("market_book", { item });
+    const res = await this.expectMsg((m) => m.type === "market_book" || m.type === "market_failed", 5000);
+    if (res.type === "market_failed") throw new Error(`시장 조회 실패: ${res.reason}`);
+    return res;
+  }
+
+  /** 지정가 주문. 즉시 체결분이 있으면 fills로 돌아온다. */
+  async marketOrder(side: "buy" | "sell", item: string, price: number, qty: number): Promise<Json> {
+    this.dropQueued("my_orders", "market_fills", "market_failed");
+    this.send("market_order", { side, item, price, qty });
+    const res = await this.expectMsg((m) => m.type === "my_orders" || m.type === "market_failed", 5000);
+    if (res.type === "market_failed") throw new Error(`주문 실패: ${res.reason}`);
+    const fills = this.queue.filter((m) => m.type === "market_fills").flatMap((m) => m.fills ?? []);
+    return { orders: res.orders, silver: res.silver, filled: fills };
+  }
+
+  async myOrders(): Promise<Json> {
+    this.dropQueued("my_orders");
+    this.send("my_orders");
+    return this.expectMsg((m) => m.type === "my_orders", 5000);
+  }
+
+  async cancelOrder(orderId: string): Promise<Json> {
+    this.dropQueued("my_orders", "market_failed");
+    this.send("market_cancel", { orderId });
+    const res = await this.expectMsg((m) => m.type === "my_orders" || m.type === "market_failed", 5000);
+    if (res.type === "market_failed") throw new Error(`취소 실패: ${res.reason}`);
+    return res;
+  }
+
+  /** NPC 상점과 즉시 거래 (가격 밴드 — 항상 불리하지만 항상 가능). */
+  async npcTrade(side: "buy" | "sell", item: string, qty: number): Promise<Json> {
+    this.dropQueued("inventory", "market_failed");
+    this.send("npc_trade", { side, item, qty });
+    const res = await this.expectMsg((m) => m.type === "inventory" || m.type === "market_failed", 5000);
+    if (res.type === "market_failed") throw new Error(`NPC 거래 실패: ${res.reason}`);
+    return { inventory: res.inventory, silver: res.silver };
+  }
+
   /** 이름으로 접속 중인 플레이어 id를 찾는다. */
   findPlayer(nameOrId: string): { id: string; name: string; x: number; y: number } | null {
     let found: { id: string; name: string; x: number; y: number } | null = null;
@@ -346,6 +401,8 @@ export class GameClient {
       me: { id: this.playerId, name: this.name, x: Math.round(this.me.x), y: Math.round(this.me.y) },
       map: { id: this.state.mapId, width: this.state.width, height: this.state.height },
       inventory: this.inventory,
+      silver: this.silver,
+      skills: this.skills,
       players,
       nodes: [...this.nodes.values()]
         .map((n) => ({

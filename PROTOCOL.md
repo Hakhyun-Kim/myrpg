@@ -80,6 +80,12 @@ state.nodes    : Map<nodeId,   { kind, x, y, remaining }>
 | `trade_offer` | `{ items }` | 내 제안 전체 교체 |
 | `trade_accept` | — | 내 쪽 확정 |
 | `trade_cancel` | — | 거래 취소 |
+| `market_book` | `{ item }` | 호가창 요청 (§9) |
+| `market_order` | `{ side, item, price, qty }` | 지정가 주문 등록 |
+| `market_cancel` | `{ orderId }` | 주문 취소 |
+| `my_orders` | — | 내 미체결 주문 + 은화 |
+| `npc_trade` | `{ side, item, qty }` | NPC 상시 거래 (가격 밴드) |
+| `skills` | — | 생활 스킬·마스터리 조회 |
 
 형식 위반 메시지는 조용히 무시된다 (서버는 판정만 한다 — 올바른 요청을 보내는 것은 클라이언트의 몫).
 
@@ -157,7 +163,36 @@ B: trade_respond {accept:true}
 
 안전 규칙: 보유하지 않은 물건은 제안 불가 · 교환 직전 재고를 다시 검증(거래 중 소모 대비) · 거래 중 144px 초과로 멀어지면 자동 취소 · 이탈 시 자동 취소.
 
-## 9. 봇 작성자를 위한 최소 절차
+## 9. 시장 — 위탁 거래소
+
+가격-시간 우선 오더북. **오프라인에도 체결된다**(주문 유효 7일) — 동시 접속을 요구하지 않는 것이 소규모 서버의 생명줄이다.
+
+- 화폐: **은화**(단일). 신규 계정 지참금 500은.
+- 수수료: 등록 **2%**(미체결에도 환불 없음) + 체결 **3%**(판매 대금에서 공제)
+- **에스크로**: 등록 시점에 물건(매도)·은화(매수)를 계정에서 뺀다 → 이중 지출 불가
+- 체결가는 **먼저 걸어둔 쪽(메이커) 기준**. 매수가 지정가보다 싸게 체결되면 차액을 환급한다
+- 자기 주문끼리는 체결되지 않는다(수수료 세탁 방지). 주문 상한 계정당 12건
+- **일일 유지비**: 하루 120은 + 미체결 주문당 12은 (창고·장부 점유료 — 주요 Sink)
+
+**NPC 가격 밴드** (§소규모 대응): 기준가의 **60% 매입 / 200% 판매**. 가격을 고정하지 않고 바닥·천장만 만든다.
+- 매입은 모든 품목, 단 **계정당 하루 24개**까지 (무제한 매입은 화폐 인플레의 주범)
+- 판매는 T1 원자재(`wood`/`copper_ore`/`herb`)만 — 완제품은 플레이어만 만든다
+- **기준가** = 최근 30일 체결의 수량가중평균 (이력이 없으면 초기값)
+
+**S→C 메시지:**
+
+| type | 페이로드 |
+|---|---|
+| `market_book` | `{ item, bids[], asks[], refPrice, npcBuy, npcSell, lastPrice, dayVolume }` |
+| `my_orders` | `{ orders: [{id, side, item, price, remaining, total, expiresAt}], silver }` |
+| `market_fills` | `{ fills: [{orderId, side, item, qty, price, fee, counterparty}], silver, inventory }` |
+| `market_failed` | `{ reason }` — `unknown_item`·`bad_price`·`bad_qty`·`no_silver`·`no_items`·`too_many_orders`·`not_found`·`npc_limit` |
+| `skills` | `{ skills: {id: {level, xp, xpNeeded}}, budgetUsed, budgetTotal }` |
+| `tool_broken` | `{ item }` — 채집 도구가 소모됐다 |
+
+**채집 도구**: 채집 40회마다 구리 단검 1개가 소모된다. 도구가 없으면 산출이 절반. (완제품의 소비처 — 이게 없으면 경제가 인플레로 무너진다는 것을 봇 시뮬레이션이 보여줬다.)
+
+## 10. 봇 작성자를 위한 최소 절차
 
 ```
 1. joinOrCreate("haran", { name }) → 핸들러 등록 → send("hello") → welcome 수신, token 저장

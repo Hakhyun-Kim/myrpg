@@ -38,6 +38,11 @@ const CAPTURED = [
   "craft_failed",
   "claim_result",
   "inventory",
+  "market_book",
+  "market_fills",
+  "market_failed",
+  "my_orders",
+  "skills",
 ] as const;
 
 /** 룸 메시지를 큐로 받아 조건 대기할 수 있게 감싼 미니 클라이언트. */
@@ -115,7 +120,7 @@ describe("PROTOCOL.md 스모크 (Colyseus 계약)", () => {
   it("봇이 입장 → 이동 → 채집 1회에 성공한다", async () => {
     const bot = await TestClient.join(url, { name: "smokebot" });
     const welcome = await bot.expectMsg((m) => m.type === "welcome");
-    expect(welcome.protocol).toBe("0.2");
+    expect(welcome.protocol).toBe("0.3");
     expect(welcome.token).toBeTruthy();
 
     const state = bot.room.state as Json;
@@ -209,6 +214,72 @@ describe("PROTOCOL.md 스모크 (Colyseus 계약)", () => {
 
     await c.leave();
   }, 20_000);
+
+  it("시장 계약: 매도 등록 → 상대 매수 체결 → 양쪽 통지", async () => {
+    const s = await TestClient.join(url, { name: "mk_seller" });
+    const b = await TestClient.join(url, { name: "mk_buyer" });
+    const ws = await s.expectMsg((m) => m.type === "welcome");
+    const wb = await b.expectMsg((m) => m.type === "welcome");
+    expect(ws.silver).toBe(500); // 신규 지참금
+    expect(ws.skills.budgetTotal).toBe(40);
+
+    const state = s.room.state as Json;
+    await s.waitState(() => state.nodes.size > 0 && state.players.has(ws.playerId));
+
+    // 판매자: 나무 2개 채집
+    let treeId = "";
+    let tree: Json | null = null;
+    state.nodes.forEach((n: Json, id: string) => {
+      if (n.kind === "tree" && n.remaining >= 2 && !tree) {
+        tree = n;
+        treeId = id;
+      }
+    });
+    s.room.send("move_to", { x: tree!.x, y: tree!.y });
+    await s.waitState(() => {
+      const p = state.players.get(ws.playerId);
+      return Math.hypot(p.x - tree!.x, p.y - tree!.y) <= 48;
+    });
+    for (let i = 0; i < 2; i++) {
+      s.room.send("gather", { nodeId: treeId });
+      await s.expectMsg((m) => m.type === "gather_result");
+    }
+
+    // 매도 2개 @5은
+    s.room.send("market_order", { side: "sell", item: "wood", price: 5, qty: 2 });
+    const myOrders = await s.expectMsg((m) => m.type === "my_orders");
+    expect(myOrders.orders).toHaveLength(1);
+
+    // 호가창에 반영
+    b.room.send("market_book", { item: "wood" });
+    const book = await b.expectMsg((m) => m.type === "market_book");
+    expect(book.asks[0]).toEqual({ price: 5, qty: 2 });
+    expect(book.npcBuy).toBeGreaterThan(0);
+
+    // 매수 → 즉시 체결, 양쪽 통지
+    b.room.send("market_order", { side: "buy", item: "wood", price: 5, qty: 2 });
+    const buyerFills = await b.expectMsg((m) => m.type === "market_fills");
+    expect(buyerFills.fills[0].qty).toBe(2);
+    expect(buyerFills.inventory.wood).toBe(2);
+
+    const sellerFills = await s.expectMsg((m) => m.type === "market_fills");
+    expect(sellerFills.fills[0].price).toBe(5);
+    expect(sellerFills.silver).toBeGreaterThan(0);
+
+    // NPC 즉시 매도 (가격 바닥)
+    b.room.send("npc_trade", { side: "sell", item: "wood", qty: 2 });
+    const afterNpc = await b.expectMsg((m) => m.type === "inventory");
+    expect(afterNpc.inventory.wood ?? 0).toBe(0);
+    expect(afterNpc.silver).toBeGreaterThan(0);
+
+    // 잔고 부족 주문 거부
+    b.room.send("market_order", { side: "buy", item: "wood", price: 999_999, qty: 999 });
+    const failed = await b.expectMsg((m) => m.type === "market_failed");
+    expect(failed.reason).toBe("no_silver");
+
+    await s.leave();
+    await b.leave();
+  }, 25_000);
 
   it("채팅이 두 클라이언트 사이에 방송된다", async () => {
     const a = await TestClient.join(url, { name: "chat_a" });

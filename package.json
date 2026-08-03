@@ -14,6 +14,7 @@
     "build": "npm -w @myrpg/server run build && npm -w @myrpg/client run build && npm -w @myrpg/client3d run build",
     "start": "npm -w @myrpg/server run start",
     "bot": "npm -w @myrpg/bot run start --",
+    "sim": "npm -w @myrpg/server run sim --",
     "test": "npm -w @myrpg/server run test",
     "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck && npm -w @myrpg/client3d run typecheck && npm -w @myrpg/mcp run typecheck"
   },

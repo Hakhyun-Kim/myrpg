@@ -10,11 +10,15 @@ function unitMs(params: GameParams): number {
   return params.craftMsT1; // 티어 확장 시 recipe.tier로 분기
 }
 
-/** 경과 시간만큼 완성분을 ready로 옮긴다. 완주한 작업은 큐에서 제거. */
-export function settle(account: Account, now: number, params: GameParams): void {
+/**
+ * 경과 시간만큼 완성분을 ready로 옮긴다. 완주한 작업은 큐에서 제거.
+ * 반환: 이번 정산에서 완성된 유닛 수 (레시피별) — 호출자가 경험치 지급에 쓴다.
+ */
+export function settle(account: Account, now: number, params: GameParams): Record<string, number> {
   if (!account.jobs) account.jobs = [];
   if (!account.ready) account.ready = {};
   const ms = unitMs(params);
+  const completed: Record<string, number> = {};
   account.jobs = account.jobs.filter((job) => {
     const recipe = RECIPES[job.recipeId];
     if (!recipe) return false; // 레시피가 사라진 작업은 폐기 (원료는 이미 소모 — 마이그레이션 이슈)
@@ -23,9 +27,11 @@ export function settle(account: Account, now: number, params: GameParams): void 
       job.done += producible;
       job.startAt += producible * ms;
       account.ready![recipe.output] = (account.ready![recipe.output] ?? 0) + producible * recipe.outputCount;
+      completed[job.recipeId] = (completed[job.recipeId] ?? 0) + producible;
     }
     return job.done < job.total;
   });
+  return completed;
 }
 
 export function tryCraft(

@@ -5,7 +5,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { GAME, RECIPES } from "@myrpg/protocol";
+import { GAME, RECIPES, TRADABLE_ITEMS } from "@myrpg/protocol";
 import { GameClient } from "./client.js";
 
 const SERVER_URL = process.env.MYRPG_URL ?? "ws://localhost:7777";
@@ -127,6 +127,78 @@ mcp.tool("claim", "제작 완료품을 전량 수령해 가방에 넣는다.", {
     return fail(err);
   }
 });
+
+const itemEnum = z.enum(TRADABLE_ITEMS as [string, ...string[]]);
+
+mcp.tool(
+  "market_book",
+  "위탁 거래소 호가창을 본다: 매도/매수 호가, 기준가(최근 30일 체결 가중평균), NPC 매입·판매가, 최근 체결가, 24시간 거래량.",
+  { item: itemEnum.describe("품목 id") },
+  async ({ item }) => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.marketBook(item));
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool(
+  "market_order",
+  "위탁 거래소에 지정가 주문을 등록한다. 반대편 호가가 있으면 즉시 체결되고 남으면 장부에 걸린다(7일 유효). 등록 수수료 2%(미체결에도 환불 없음), 체결 수수료 3%(판매 대금에서 공제). 등록 시점에 물건·은화가 에스크로된다.",
+  {
+    side: z.enum(["buy", "sell"]),
+    item: itemEnum,
+    price: z.number().int().min(1).describe("개당 은화"),
+    qty: z.number().int().min(1).max(9999),
+  },
+  async ({ side, item, price, qty }) => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.marketOrder(side, item, price, qty));
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool("my_orders", "내가 등록한 미체결 주문과 은화 잔고를 본다.", {}, async () => {
+  try {
+    await client.ensureConnected();
+    return ok(await client.myOrders());
+  } catch (err) {
+    return fail(err);
+  }
+});
+
+mcp.tool(
+  "market_cancel",
+  "미체결 주문을 취소하고 에스크로를 돌려받는다 (등록 수수료는 환불되지 않는다).",
+  { orderId: z.string() },
+  async ({ orderId }) => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.cancelOrder(orderId));
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool(
+  "npc_trade",
+  "NPC 상점과 즉시 거래한다 (가격 밴드 — 항상 불리하지만 항상 성사된다). sell은 모든 품목 매입(기준가 60%), buy는 T1 원자재만 판매(기준가 200%). 플레이어끼리 거래하는 편이 언제나 이득이다.",
+  { side: z.enum(["buy", "sell"]), item: itemEnum, qty: z.number().int().min(1).max(9999) },
+  async ({ side, item, qty }) => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.npcTrade(side, item, qty));
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
 
 mcp.tool(
   "trade_request",
