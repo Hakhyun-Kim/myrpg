@@ -9,10 +9,13 @@ PROTOCOL.md와 공식 SDK(colyseus.js)만으로 봇을 만들 수 있으며, 그
 
 ```bash
 npm install
-npm run dev        # 서버(7777) + 클라이언트(5173) 동시 기동
+npm run dev        # 서버(7777) + 2D 테스트(5173) + 3D(5174) 동시 기동
 ```
 
-브라우저에서 http://localhost:5173 → 이름 입력 → 클릭 이동, 노드 클릭 채집, Enter 채팅.
+- **고비주얼 (3D)**: http://localhost:5174 — Three.js 쿼터뷰. 플레이어용 화면
+- **테스트 (2D)**: http://localhost:5173 — Phaser 도형 렌더. 개발·검증용 (가볍고 상태가 한눈에 보임)
+
+이름 입력 → 클릭 이동, 자원 클릭 채집, Enter 채팅. 두 클라이언트는 **같은 룸 계약의 다른 뷰**일 뿐이라 같은 세계에 함께 접속한다.
 
 봇 접속 (다른 터미널에서):
 ```bash
@@ -37,7 +40,7 @@ npm run typecheck
 프로덕션 (단일 프로세스 — 서버가 클라이언트 정적 파일도 서빙):
 ```bash
 npm run build
-npm start          # http://localhost:7777
+npm start          # http://localhost:7777 (/ = 3D 고비주얼, /test = 2D 테스트)
 ```
 
 ## 구조
@@ -47,7 +50,8 @@ PROTOCOL.md          통신 규약 — 이 프로젝트의 헌법
 packages/
   protocol/          공유 타입·상수 (서버·클라 공용)
   server/            권위 서버: 월드 시뮬(world.ts) + Colyseus 룸(room.ts) + 스토리지 어댑터
-  client/            Vite + Phaser 클라이언트
+  client3d/          고비주얼 클라이언트 (Three.js 쿼터뷰) — 프로덕션 루트(/)
+  client/            2D 테스트 클라이언트 (Phaser) — 프로덕션 /test
   bot/               레퍼런스 봇 — colyseus.js로 PROTOCOL.md 계약만 보고 작성
   mcp/               MCP 서버 — AI 에이전트를 게임 플레이어로 (join/look/goto/gather/say)
 ```
