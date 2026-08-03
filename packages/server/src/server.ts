@@ -34,9 +34,11 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
     return emptySave();
   });
 
-  const clientDist = config.clientDist ?? defaultClientDist();
+  // 정적 서빙 이원화: 루트(/) = 고비주얼 3D, /test = 2D 테스트 클라이언트
+  const mainDist = config.clientDist ?? defaultDist("../../client3d/dist");
+  const testDist = defaultDist("../../client/dist");
   const httpServer = createServer((req, res) => {
-    void handleHttp(req, res, clientDist);
+    void handleHttp(req, res, mainDist, testDist);
   });
 
   const gameServer = new Server({
@@ -59,9 +61,9 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
 }
 
 // ---- 정적 파일 (프로덕션: 서버 하나가 클라이언트도 서빙 — 단일 프로세스 이식성) ----
-function defaultClientDist(): string | null {
+function defaultDist(rel: string): string | null {
   const here = dirname(fileURLToPath(import.meta.url));
-  const p = resolve(here, "../../client/dist");
+  const p = resolve(here, rel);
   return existsSync(p) ? p : null;
 }
 
@@ -75,22 +77,35 @@ const MIME: Record<string, string> = {
   ".svg": "image/svg+xml",
 };
 
-async function handleHttp(req: IncomingMessage, res: ServerResponse, clientDist: string | null): Promise<void> {
+async function handleHttp(
+  req: IncomingMessage,
+  res: ServerResponse,
+  mainDist: string | null,
+  testDist: string | null,
+): Promise<void> {
   const path = (req.url ?? "/").split("?")[0] ?? "/";
   if (path === "/health") return sendJson(res, { ok: true });
   if (path === "/config.json") return sendJson(res, { room: ROOM_NAME });
 
-  if (clientDist && req.method === "GET") {
-    const rel = path === "/" ? "index.html" : path.slice(1);
-    const file = normalize(join(clientDist, rel));
-    if (file.startsWith(normalize(clientDist)) && existsSync(file)) {
-      try {
-        const body = await readFile(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
-        res.end(body);
-        return;
-      } catch {
-        /* fall through */
+  if (req.method === "GET") {
+    // /test → 2D 테스트 클라이언트, 그 외 → 고비주얼 3D
+    let dist = mainDist;
+    let rel = path === "/" ? "index.html" : path.slice(1);
+    if (path === "/test" || path.startsWith("/test/")) {
+      dist = testDist;
+      rel = path === "/test" || path === "/test/" ? "index.html" : path.slice("/test/".length);
+    }
+    if (dist) {
+      const file = normalize(join(dist, rel));
+      if (file.startsWith(normalize(dist)) && existsSync(file)) {
+        try {
+          const body = await readFile(file);
+          res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+          res.end(body);
+          return;
+        } catch {
+          /* fall through */
+        }
       }
     }
   }

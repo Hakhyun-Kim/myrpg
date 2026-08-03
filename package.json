@@ -7,14 +7,15 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev": "concurrently -n server,test2d,3d -c blue,green,magenta \"npm:dev:server\" \"npm:dev:client\" \"npm:dev:client3d\"",
     "dev:server": "cross-env PORT=7777 npm -w @myrpg/server run dev",
     "dev:client": "npm -w @myrpg/client run dev",
-    "build": "npm -w @myrpg/server run build && npm -w @myrpg/client run build",
+    "dev:client3d": "npm -w @myrpg/client3d run dev",
+    "build": "npm -w @myrpg/server run build && npm -w @myrpg/client run build && npm -w @myrpg/client3d run build",
     "start": "npm -w @myrpg/server run start",
     "bot": "npm -w @myrpg/bot run start --",
     "test": "npm -w @myrpg/server run test",
-    "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck && npm -w @myrpg/mcp run typecheck"
+    "typecheck": "npm -w @myrpg/protocol run typecheck && npm -w @myrpg/server run typecheck && npm -w @myrpg/client run typecheck && npm -w @myrpg/client3d run typecheck && npm -w @myrpg/mcp run typecheck"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
