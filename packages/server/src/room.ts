@@ -44,6 +44,10 @@ const joinSchema = z.object({
   token: z.string().max(64).optional(),
 });
 const moveSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
+const moveDirSchema = z.object({
+  dx: z.number().finite().min(-1).max(1),
+  dy: z.number().finite().min(-1).max(1),
+});
 const chatSchema = z.object({ text: z.string().min(1).max(GAME.MAX_CHAT_LEN) });
 const gatherSchema = z.object({ nodeId: z.string().max(64) });
 const craftSchema = z.object({
@@ -130,6 +134,14 @@ export class HaranRoom extends Room<HaranState> {
       const p = this.playerOf(client);
       if (!msg.success || !p) return;
       const { cancelledGather } = this.world.moveTo(p, msg.data.x, msg.data.y);
+      if (cancelledGather) client.send("gather_failed", { nodeId: cancelledGather, reason: "moved" });
+    });
+    this.onMessage("move_dir", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = moveDirSchema.safeParse(raw);
+      const p = this.playerOf(client);
+      if (!msg.success || !p) return;
+      const { cancelledGather } = this.world.moveDir(p, msg.data.dx, msg.data.dy);
       if (cancelledGather) client.send("gather_failed", { nodeId: cancelledGather, reason: "moved" });
     });
     this.onMessage("stop", (client) => {
@@ -303,6 +315,9 @@ export class HaranRoom extends Room<HaranState> {
     let account = save.accounts[name];
     if (account) {
       if (token !== account.token) throw new ServerError(401, "auth_failed: 이름-토큰 불일치");
+      // Phase 2 이전 계정 마이그레이션 — 없던 필드를 채운다
+      if (account.silver === undefined) account.silver = 500;
+      account.skills ??= {};
     } else {
       account = {
         name,

@@ -281,6 +281,37 @@ describe("PROTOCOL.md 스모크 (Colyseus 계약)", () => {
     await b.leave();
   }, 25_000);
 
+  it("키보드 이동 계약: move_dir로 이동하고 {0,0}에서 멈춘다", async () => {
+    const c = await TestClient.join(url, { name: "walker" });
+    const w = await c.expectMsg((m) => m.type === "welcome");
+    const state = c.room.state as Json;
+    await c.waitState(() => state.players.has(w.playerId));
+    const start = { ...state.players.get(w.playerId) };
+
+    c.room.send("move_dir", { dx: 1, dy: 0 }); // 오른쪽
+    await c.waitState(() => state.players.get(w.playerId).x > start.x + 50);
+    expect(state.players.get(w.playerId).y).toBeCloseTo(start.y, 0); // y는 변하지 않는다
+
+    c.room.send("move_dir", { dx: 0, dy: 0 }); // 정지
+    await new Promise((r) => setTimeout(r, 150));
+    const stopped = state.players.get(w.playerId).x;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(state.players.get(w.playerId).x).toBe(stopped);
+
+    // 대각선은 정규화되어 속도가 같다 (√2배 빨라지지 않는다)
+    const before = { ...state.players.get(w.playerId) };
+    c.room.send("move_dir", { dx: 1, dy: 1 });
+    await new Promise((r) => setTimeout(r, 300));
+    c.room.send("move_dir", { dx: 0, dy: 0 });
+    const after = state.players.get(w.playerId);
+    const travelled = Math.hypot(after.x - before.x, after.y - before.y);
+    const axis = Math.abs(after.x - before.x);
+    expect(travelled).toBeGreaterThan(axis); // 실제로 대각선 이동
+    expect(axis / travelled).toBeCloseTo(Math.SQRT1_2, 1); // 각 축은 1/√2
+
+    await c.leave();
+  }, 15_000);
+
   it("채팅이 두 클라이언트 사이에 방송된다", async () => {
     const a = await TestClient.join(url, { name: "chat_a" });
     const b = await TestClient.join(url, { name: "chat_b" });

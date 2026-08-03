@@ -51,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   private pendingGather: string | null = null;
   private progress: Phaser.GameObjects.Rectangle | null = null;
   private joinedAt = 0;
+  private lastDir = { dx: 0, dy: 0 };
 
   constructor() {
     super("game");
@@ -134,6 +135,64 @@ export class GameScene extends Phaser.Scene {
       } else {
         this.pendingGather = null;
         this.room.send("move_to", { x: wx, y: wy });
+      }
+    });
+
+    this.bindKeyboard();
+  }
+
+  /** WASD·화살표 연속 이동. 방향 조합이 바뀔 때만 서버에 보낸다. */
+  private bindKeyboard(): void {
+    const MOVE_KEYS: Record<string, [number, number]> = {
+      KeyW: [0, -1],
+      ArrowUp: [0, -1],
+      KeyS: [0, 1],
+      ArrowDown: [0, 1],
+      KeyA: [-1, 0],
+      ArrowLeft: [-1, 0],
+      KeyD: [1, 0],
+      ArrowRight: [1, 0],
+    };
+    const pressed = new Set<string>();
+    const typing = (): boolean => {
+      const tag = document.activeElement?.tagName;
+      return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+    };
+    const flush = (): void => {
+      let dx = 0;
+      let dy = 0;
+      for (const code of pressed) {
+        const v = MOVE_KEYS[code];
+        if (v) {
+          dx += v[0];
+          dy += v[1];
+        }
+      }
+      dx = Math.max(-1, Math.min(1, dx));
+      dy = Math.max(-1, Math.min(1, dy));
+      if (dx === this.lastDir.dx && dy === this.lastDir.dy) return;
+      this.lastDir = { dx, dy };
+      this.pendingGather = null;
+      this.room.send("move_dir", { dx, dy });
+    };
+
+    window.addEventListener("keydown", (ev) => {
+      if (typing() || !MOVE_KEYS[ev.code]) return;
+      ev.preventDefault();
+      if (!pressed.has(ev.code)) {
+        pressed.add(ev.code);
+        flush();
+      }
+    });
+    window.addEventListener("keyup", (ev) => {
+      if (!MOVE_KEYS[ev.code]) return;
+      pressed.delete(ev.code);
+      flush();
+    });
+    window.addEventListener("blur", () => {
+      if (pressed.size > 0) {
+        pressed.clear();
+        flush();
       }
     });
   }

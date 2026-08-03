@@ -3,90 +3,117 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MyRPG — 하란</title>
+    <title>MyRPG — 하란 (2D 테스트)</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #1a1a24; color: #eee;
+      :root {
+        --bg: #1a1a24;
+        --panel: rgba(22, 22, 32, .9);
+        --line: #3a3a4a;
+        --gold: #d8b45a;
+        --text: #e8e8ee;
+        --muted: #8b8b9b;
+      }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
         font-family: 'Malgun Gothic', system-ui, sans-serif; overflow: hidden; }
       #app { position: relative; width: 100vw; height: 100vh; }
       #app canvas { display: block; }
+      button { font-family: inherit; }
 
       #login { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-        background: #1a1a24; z-index: 10; }
-      #login form { display: flex; flex-direction: column; gap: 12px; width: 260px; }
-      #login h1 { font-size: 20px; text-align: center; margin: 0 0 8px; color: #d8b45a; }
-      #login input { padding: 10px; border-radius: 6px; border: 1px solid #444; background: #22222e; color: #eee; }
-      #login button { padding: 10px; border-radius: 6px; border: 0; background: #d8b45a; color: #1a1a24;
+        background: var(--bg); z-index: 20; }
+      #login form { display: flex; flex-direction: column; gap: 12px; width: 280px; }
+      #login h1 { font-size: 20px; text-align: center; margin: 0 0 2px; color: var(--gold); }
+      #login .sub { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+      #login input { padding: 10px; border-radius: 6px; border: 1px solid var(--line); background: #22222e; color: var(--text); }
+      #login button { padding: 10px; border-radius: 6px; border: 0; background: var(--gold); color: var(--bg);
         font-weight: bold; cursor: pointer; }
       #login .err { color: #e57373; font-size: 12px; min-height: 16px; text-align: center; }
 
       #hud { position: absolute; inset: 0; pointer-events: none; display: none; z-index: 5; }
-      #inv { position: absolute; top: 10px; right: 10px; background: rgba(20,20,30,.85); border: 1px solid #3a3a4a;
-        border-radius: 8px; padding: 10px 14px; min-width: 130px; font-size: 13px; }
-      #inv h2 { margin: 0 0 6px; font-size: 12px; color: #d8b45a; }
-      #craft { position: absolute; top: 190px; right: 10px; background: rgba(20,20,30,.85); border: 1px solid #3a3a4a;
-        border-radius: 8px; padding: 10px 14px; width: 190px; font-size: 12px; pointer-events: auto; }
-      #craft h2 { margin: 0 0 6px; font-size: 12px; color: #d8b45a; }
-      #craft .recipe { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
-      #craft .recipe button { border: 0; border-radius: 4px; background: #3a3a4a; color: #eee; cursor: pointer;
-        padding: 2px 7px; margin-left: 3px; font-size: 11px; }
-      #craft .recipe button:hover { background: #55556a; }
-      #craft-queue { margin-top: 8px; border-top: 1px solid #3a3a4a; padding-top: 6px; min-height: 14px; color: #bbb; }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+      .panel h2 { margin: 0 0 6px; font-size: 11px; color: var(--gold); letter-spacing: .5px;
+        text-transform: uppercase; }
+      .muted { color: var(--muted); }
+
+      #hint { position: absolute; top: 10px; left: 10px; font-size: 11px; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+
+      #sidebar { position: absolute; top: 10px; right: 10px; bottom: 10px; width: 196px;
+        display: flex; flex-direction: column; gap: 7px; overflow-y: auto; pointer-events: auto;
+        scrollbar-width: thin; }
+      #sidebar::-webkit-scrollbar { width: 6px; }
+      #sidebar::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+      #sidebar > .panel { padding: 8px 11px; font-size: 12px; flex: none; }
+
+      #purse { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      #silver { color: var(--gold); font-weight: bold; font-size: 13px; }
+      #market-toggle { border: 0; border-radius: 5px; background: var(--gold); color: var(--bg);
+        font-weight: bold; padding: 4px 11px; cursor: pointer; font-size: 12px; }
+      #inv-items { line-height: 1.7; }
+      #skills-list { line-height: 1.7; font-size: 11px; }
+
+      .recipe { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 4px 0; }
+      .recipe button { border: 0; border-radius: 4px; background: #3a3a4a; color: var(--text); cursor: pointer;
+        padding: 2px 7px; margin-left: 3px; font-size: 10px; }
+      .recipe button:hover { background: #55556a; }
+      #craft-queue { margin-top: 7px; border-top: 1px solid var(--line); padding-top: 6px;
+        min-height: 14px; color: var(--muted); line-height: 1.6; }
       #craft-ready { margin: 6px 0; color: #a5d6a7; }
-      #claim-btn { width: 100%; border: 0; border-radius: 5px; background: #d8b45a; color: #1a1a24;
+      #claim-btn { width: 100%; border: 0; border-radius: 5px; background: var(--gold); color: var(--bg);
         font-weight: bold; padding: 5px; cursor: pointer; }
       #claim-btn:disabled { background: #3a3a4a; color: #777; cursor: default; }
-      #trade { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-        background: rgba(20,20,30,.95); border: 1px solid #d8b45a; border-radius: 10px; padding: 14px 18px;
-        width: 340px; font-size: 12px; pointer-events: auto; z-index: 8; }
-      #trade h2 { margin: 0 0 8px; font-size: 13px; color: #d8b45a; }
-      #trade h3 { margin: 6px 0 4px; font-size: 11px; color: #999; }
+
+      #chatlog { position: absolute; left: 10px; bottom: 48px; width: 340px; max-height: 180px; overflow: hidden;
+        display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px;
+        text-shadow: 0 1px 2px #000; line-height: 1.5; }
+      #chatlog div { padding: 1px 4px; }
+      #chatlog .sys { color: var(--muted); }
+      #chatbox { position: absolute; left: 10px; bottom: 10px; width: 340px; pointer-events: auto; }
+      #chatbox input { width: 100%; box-sizing: border-box; padding: 8px 11px; border-radius: 6px;
+        border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+
+      .modal { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+        background: rgba(22,22,32,.97); border: 1px solid var(--gold); border-radius: 10px; padding: 14px 18px;
+        font-size: 12px; pointer-events: auto; z-index: 10; box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+      .modal h2 { margin: 0 0 9px; font-size: 13px; color: var(--gold);
+        display: flex; justify-content: space-between; align-items: center; }
+      .modal h2 button { border: 0; border-radius: 5px; background: #3a3a4a; color: var(--text);
+        padding: 3px 10px; cursor: pointer; }
+      .modal h3 { margin: 7px 0 4px; font-size: 11px; color: var(--muted); }
+
+      #market { width: 430px; }
+      #market select, #market input { background: #22222e; color: var(--text); border: 1px solid var(--line);
+        border-radius: 4px; padding: 4px; }
+      #market input { width: 64px; }
+      #market .row { display: flex; gap: 6px; align-items: center; margin: 7px 0; flex-wrap: wrap; }
+      #market .row button { border: 0; border-radius: 5px; padding: 4px 10px; cursor: pointer;
+        background: #3a3a4a; color: var(--text); }
+      #market-buy { background: #4a7a55 !important; }
+      #market-sell { background: #7a4a4a !important; }
+      .bookcols { display: flex; gap: 20px; }
+      .bookcols > div { flex: 1; line-height: 1.6; }
+      #market-book, #market-orders { border-top: 1px solid var(--line); padding-top: 7px; margin-top: 7px;
+        line-height: 1.7; }
+      #market-orders button { padding: 1px 6px; font-size: 10px; border: 0; border-radius: 4px;
+        background: #3a3a4a; color: var(--text); cursor: pointer; margin-left: 4px; }
+
+      #trade { width: 360px; }
       #trade .cols { display: flex; gap: 14px; }
       #trade .cols > div { flex: 1; }
       .trade-item { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
       .trade-item:hover { background: #33334a; }
-      #trade-status { margin: 8px 0; color: #d8b45a; }
+      #trade-status { margin: 9px 0; color: var(--gold); }
       #trade .btns { display: flex; gap: 8px; }
       #trade .btns button { flex: 1; border: 0; border-radius: 5px; padding: 6px; cursor: pointer; font-weight: bold; }
-      #trade-accept { background: #d8b45a; color: #1a1a24; }
+      #trade-accept { background: var(--gold); color: var(--bg); }
       #trade-accept:disabled { background: #3a3a4a; color: #777; }
-      #trade-cancel { background: #3a3a4a; color: #eee; }
+      #trade-cancel { background: #3a3a4a; color: var(--text); }
       #trade-req { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
-        background: rgba(20,20,30,.95); border: 1px solid #d8b45a; border-radius: 8px; padding: 8px 14px;
-        font-size: 13px; pointer-events: auto; z-index: 8; }
+        background: rgba(22,22,32,.96); border: 1px solid var(--gold); border-radius: 8px; padding: 8px 14px;
+        font-size: 13px; pointer-events: auto; z-index: 10; }
       #trade-req button { border: 0; border-radius: 4px; padding: 3px 10px; margin-left: 6px; cursor: pointer; }
-      #trade-req-yes { background: #d8b45a; }
-      #trade-req-no { background: #3a3a4a; color: #eee; }
-      #silver { position: absolute; top: 10px; right: 152px; background: rgba(20,20,30,.85);
-        border: 1px solid #3a3a4a; border-radius: 8px; padding: 10px 12px; font-size: 13px; color: #d8b45a; }
-      #market-toggle { position: absolute; top: 46px; right: 152px; pointer-events: auto; border: 0;
-        border-radius: 6px; background: #d8b45a; color: #1a1a24; font-weight: bold; padding: 5px 10px; cursor: pointer; }
-      #skills-box { position: absolute; top: 84px; right: 152px; background: rgba(20,20,30,.85);
-        border: 1px solid #3a3a4a; border-radius: 8px; padding: 8px 12px; font-size: 11px; width: 150px; }
-      #skills-box h2 { margin: 0 0 4px; font-size: 11px; color: #d8b45a; }
-      #market { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
-        background: rgba(20,20,30,.96); border: 1px solid #d8b45a; border-radius: 10px; padding: 14px 18px;
-        width: 420px; font-size: 12px; pointer-events: auto; z-index: 9; }
-      #market h2 { margin: 0 0 8px; font-size: 13px; color: #d8b45a; display: flex; justify-content: space-between; }
-      #market select, #market input { background: #22222e; color: #eee; border: 1px solid #3a3a4a;
-        border-radius: 4px; padding: 4px; }
-      #market input { width: 62px; }
-      #market button { border: 0; border-radius: 5px; padding: 4px 10px; cursor: pointer; background: #3a3a4a; color: #eee; }
-      #market-buy { background: #5b8a5b !important; }
-      #market-sell { background: #8a5b5b !important; }
-      #market .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
-      #market .bookcols { display: flex; gap: 20px; }
-      #market .bookcols > div { flex: 1; }
-      #market .muted { color: #888; margin-top: 4px; }
-      #market-book, #market-orders { border-top: 1px solid #3a3a4a; padding-top: 6px; margin-top: 6px; }
-      #market-orders button { padding: 1px 6px; font-size: 10px; }
-      #chatlog { position: absolute; left: 10px; bottom: 46px; width: 320px; max-height: 180px; overflow: hidden;
-        display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px; text-shadow: 0 1px 2px #000; }
-      #chatlog div { padding: 1px 4px; }
-      #chatlog .sys { color: #999; }
-      #chatbox { position: absolute; left: 10px; bottom: 10px; width: 320px; pointer-events: auto; }
-      #chatbox input { width: 100%; box-sizing: border-box; padding: 8px; border-radius: 6px;
-        border: 1px solid #3a3a4a; background: rgba(20,20,30,.85); color: #eee; }
-      #status { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #8a8; }
+      #trade-req-yes { background: var(--gold); }
+      #trade-req-no { background: #3a3a4a; color: var(--text); }
     </style>
   </head>
   <body>
@@ -94,22 +121,49 @@
       <div id="login">
         <form id="login-form">
           <h1>MyRPG — 하란 마을</h1>
+          <div class="sub">2D 테스트 클라이언트 · 고비주얼은 :5174</div>
           <input id="name" placeholder="이름 (2~16자)" autocomplete="off" maxlength="16" />
           <button type="submit">입장</button>
           <div class="err" id="login-err"></div>
         </form>
       </div>
+
       <div id="hud">
-        <div id="status"></div>
-        <div id="inv"><h2>가방</h2><div id="inv-items">비어 있음</div></div>
-        <div id="silver">0 은화</div>
-        <button id="market-toggle">시장</button>
-        <div id="skills-box"><h2>생활 스킬</h2><div id="skills-list"></div></div>
-        <div id="market">
+        <div id="hint">WASD·화살표: 이동 · 클릭: 목표 이동 · 자원 클릭: 채집 · 플레이어 클릭: 거래 · Enter: 채팅</div>
+
+        <div id="sidebar">
+          <div class="panel" id="purse">
+            <span id="silver">0 은화</span>
+            <button id="market-toggle">시장</button>
+          </div>
+          <div class="panel">
+            <h2>가방</h2>
+            <div id="inv-items">비어 있음</div>
+          </div>
+          <div class="panel">
+            <h2>제작 큐</h2>
+            <div id="craft-recipes"></div>
+            <div id="craft-queue"></div>
+            <div id="craft-ready"></div>
+            <button id="claim-btn" disabled>완료품 수령</button>
+          </div>
+          <div class="panel">
+            <h2>생활 스킬</h2>
+            <div id="skills-list"></div>
+          </div>
+        </div>
+
+        <div id="chatlog"></div>
+        <div id="chatbox"><input id="chat-input" placeholder="Enter로 채팅" maxlength="200" /></div>
+
+        <div id="trade-req">🤝 <span id="trade-req-name"></span> 님의 거래 요청
+          <button id="trade-req-yes">수락</button><button id="trade-req-no">거절</button></div>
+
+        <div id="market" class="modal">
           <h2>위탁 거래소 <button id="market-close">닫기</button></h2>
           <div class="row">
             <select id="market-item"></select>
-            가격 <input id="market-price" type="number" min="1" value="5" />
+            가격 <input id="market-price" type="number" min="1" value="20" />
             수량 <input id="market-qty" type="number" min="1" value="1" />
           </div>
           <div class="row">
@@ -121,18 +175,8 @@
           <div id="market-book"></div>
           <div id="market-orders"></div>
         </div>
-        <div id="craft">
-          <h2>제작 큐</h2>
-          <div id="craft-recipes"></div>
-          <div id="craft-queue"></div>
-          <div id="craft-ready"></div>
-          <button id="claim-btn" disabled>완료품 수령</button>
-        </div>
-        <div id="chatlog"></div>
-        <div id="chatbox"><input id="chat-input" placeholder="Enter로 채팅" maxlength="200" /></div>
-        <div id="trade-req">🤝 <span id="trade-req-name"></span> 님의 거래 요청
-          <button id="trade-req-yes">수락</button><button id="trade-req-no">거절</button></div>
-        <div id="trade">
+
+        <div id="trade" class="modal">
           <h2>거래 — <span id="trade-partner"></span></h2>
           <div class="cols">
             <div><h3>내 제안 (클릭해 빼기)</h3><div id="trade-mine"></div>

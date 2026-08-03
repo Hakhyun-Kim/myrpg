@@ -26,6 +26,8 @@ export interface WorldPlayer {
   x: number;
   y: number;
   target: { x: number; y: number } | null;
+  /** 키보드 연속 이동 방향 (정규화됨). target과 배타적 — 나중에 온 명령이 이긴다 */
+  dir: { x: number; y: number } | null;
   gather: { nodeId: string; endsAt: number } | null;
   inventory: Inventory;
 }
@@ -72,6 +74,7 @@ export class World {
       x: clamp(x, 0, this.map.width),
       y: clamp(y, 0, this.map.height),
       target: null,
+      dir: null,
       gather: null,
       inventory,
     };
@@ -83,16 +86,28 @@ export class World {
     this.players.delete(id);
   }
 
-  /** 이동 명령. 채집 중이었다면 취소하고 그 사실을 반환한다. */
+  /** 목표점 이동. 채집 중이었다면 취소하고 그 사실을 반환한다. */
   moveTo(p: WorldPlayer, x: number, y: number): { cancelledGather: string | null } {
     p.target = { x: clamp(x, 0, this.map.width), y: clamp(y, 0, this.map.height) };
+    p.dir = null;
     const cancelled = p.gather?.nodeId ?? null;
     p.gather = null;
     return { cancelledGather: cancelled };
   }
 
+  /** 키보드 연속 이동. dx=dy=0이면 정지. 채집 중이었다면 취소. */
+  moveDir(p: WorldPlayer, dx: number, dy: number): { cancelledGather: string | null } {
+    const len = Math.hypot(dx, dy);
+    p.target = null;
+    p.dir = len < 0.01 ? null : { x: dx / len, y: dy / len };
+    const cancelled = p.dir ? (p.gather?.nodeId ?? null) : null;
+    if (p.dir) p.gather = null;
+    return { cancelledGather: cancelled };
+  }
+
   stop(p: WorldPlayer): void {
     p.target = null;
+    p.dir = null;
   }
 
   tryGather(
@@ -106,6 +121,7 @@ export class World {
     if (p.gather) return { ok: false, reason: "busy" };
     if (dist(p.x, p.y, node.x, node.y) > this.params.gatherRange) return { ok: false, reason: "too_far" };
     p.target = null; // 채집 시작 = 정지
+    p.dir = null;
     const endsAt = now + this.params.gatherMs;
     p.gather = { nodeId, endsAt };
     return { ok: true, endsAt };
@@ -117,16 +133,25 @@ export class World {
     const moved: { id: string; x: number; y: number }[] = [];
 
     for (const p of this.players.values()) {
-      if (!p.target) continue;
-      const d = dist(p.x, p.y, p.target.x, p.target.y);
       const step = (this.params.moveSpeed * dtMs) / 1000;
-      if (d <= step) {
-        p.x = p.target.x;
-        p.y = p.target.y;
-        p.target = null;
+      if (p.dir) {
+        // 키보드 연속 이동 — 맵 경계에 붙으면 그 축만 멈춘다 (벽을 따라 미끄러짐)
+        const before = { x: p.x, y: p.y };
+        p.x = clamp(p.x + p.dir.x * step, 0, this.map.width);
+        p.y = clamp(p.y + p.dir.y * step, 0, this.map.height);
+        if (p.x === before.x && p.y === before.y) continue;
+      } else if (p.target) {
+        const d = dist(p.x, p.y, p.target.x, p.target.y);
+        if (d <= step) {
+          p.x = p.target.x;
+          p.y = p.target.y;
+          p.target = null;
+        } else {
+          p.x += ((p.target.x - p.x) / d) * step;
+          p.y += ((p.target.y - p.y) / d) * step;
+        }
       } else {
-        p.x += ((p.target.x - p.x) / d) * step;
-        p.y += ((p.target.y - p.y) / d) * step;
+        continue;
       }
       moved.push({ id: p.id, x: round1(p.x), y: round1(p.y) });
     }

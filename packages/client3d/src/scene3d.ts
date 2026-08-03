@@ -55,6 +55,9 @@ export class World3D {
   private pendingGather: string | null = null;
   private zoom = 1;
   private joinedAt = Date.now();
+  /** 눌린 이동 키 — 조합이 바뀔 때만 서버에 방향을 보낸다 */
+  private keys = new Set<string>();
+  private lastDir = { dx: 0, dy: 0 };
 
   constructor(
     container: HTMLElement,
@@ -68,8 +71,8 @@ export class World3D {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color(0x10141c);
-    this.scene.fog = new THREE.Fog(0x10141c, 900, 2000);
+    this.scene.background = new THREE.Color(0x243044);
+    this.scene.fog = new THREE.Fog(0x243044, 1100, 2400);
 
     this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 4000);
     this.camera.position.set(640, 500, 900);
@@ -97,7 +100,7 @@ export class World3D {
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
-      new THREE.MeshLambertMaterial({ color: 0x2c4526 }),
+      new THREE.MeshLambertMaterial({ color: 0x4a6b3a }),
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(w / 2, 0, h / 2);
@@ -108,7 +111,7 @@ export class World3D {
     // 맵 밖 어두운 대지 (경계 인지용)
     const outer = new THREE.Mesh(
       new THREE.PlaneGeometry(w * 4, h * 4),
-      new THREE.MeshLambertMaterial({ color: 0x1a2418 }),
+      new THREE.MeshLambertMaterial({ color: 0x2e4028 }),
     );
     outer.rotation.x = -Math.PI / 2;
     outer.position.set(w / 2, -0.5, h / 2);
@@ -126,8 +129,10 @@ export class World3D {
   }
 
   private buildLights(): void {
-    this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a3a24, 0.9));
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
+    // 낮 분위기 — 이전 설정은 화면이 밤처럼 어두웠다
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    this.scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x4a5c38, 1.1));
+    const sun = new THREE.DirectionalLight(0xfff2d8, 2.1);
     sun.position.set(900, 800, 300);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -325,6 +330,62 @@ export class World3D {
     el.addEventListener("wheel", (ev) => {
       this.zoom = Math.min(2.2, Math.max(0.5, this.zoom + (ev.deltaY > 0 ? 0.1 : -0.1)));
     });
+
+    // ---- 키보드 이동 (WASD / 화살표) ----
+    const MOVE_KEYS: Record<string, [number, number]> = {
+      KeyW: [0, -1],
+      ArrowUp: [0, -1],
+      KeyS: [0, 1],
+      ArrowDown: [0, 1],
+      KeyA: [-1, 0],
+      ArrowLeft: [-1, 0],
+      KeyD: [1, 0],
+      ArrowRight: [1, 0],
+    };
+    const typing = (): boolean => {
+      const tag = document.activeElement?.tagName;
+      return tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
+    };
+
+    window.addEventListener("keydown", (ev) => {
+      if (typing() || !MOVE_KEYS[ev.code]) return;
+      ev.preventDefault();
+      if (!this.keys.has(ev.code)) {
+        this.keys.add(ev.code);
+        this.sendDir(MOVE_KEYS);
+      }
+    });
+    window.addEventListener("keyup", (ev) => {
+      if (!MOVE_KEYS[ev.code]) return;
+      this.keys.delete(ev.code);
+      this.sendDir(MOVE_KEYS);
+    });
+    // 창을 벗어나면 키가 눌린 채로 남는다 — 안전하게 정지
+    window.addEventListener("blur", () => {
+      if (this.keys.size > 0) {
+        this.keys.clear();
+        this.sendDir(MOVE_KEYS);
+      }
+    });
+  }
+
+  /** 눌린 키를 합쳐 방향을 만든다. 변화가 있을 때만 전송 (레이트 리밋 절약) */
+  private sendDir(map: Record<string, [number, number]>): void {
+    let dx = 0;
+    let dy = 0;
+    for (const code of this.keys) {
+      const v = map[code];
+      if (v) {
+        dx += v[0];
+        dy += v[1];
+      }
+    }
+    dx = Math.max(-1, Math.min(1, dx));
+    dy = Math.max(-1, Math.min(1, dy));
+    if (dx === this.lastDir.dx && dy === this.lastDir.dy) return;
+    this.lastDir = { dx, dy };
+    this.pendingGather = null; // 수동 이동은 예약 채집을 취소한다
+    this.room.send("move_dir", { dx, dy });
   }
 
   private tryGatherIfNear(): void {
@@ -350,7 +411,7 @@ export class World3D {
     const me = this.players.get(this.welcome.playerId);
     if (me) {
       const target = me.group.position;
-      const desired = new THREE.Vector3(target.x, 420 * this.zoom, target.z + 340 * this.zoom);
+      const desired = new THREE.Vector3(target.x, 300 * this.zoom, target.z + 260 * this.zoom);
       this.camera.position.lerp(desired, 0.08);
       this.camera.lookAt(target.x, 20, target.z);
     }

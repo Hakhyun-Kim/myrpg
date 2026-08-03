@@ -229,6 +229,11 @@ export interface MoveToMsg {
   x: number;
   y: number;
 }
+/** 키보드 연속 이동 — 방향 벡터(정규화 불필요, 서버가 정규화). {dx:0, dy:0}이면 정지 */
+export interface MoveDirMsg {
+  dx: number;
+  dy: number;
+}
 export interface ChatSendMsg {
   text: string;
 }
