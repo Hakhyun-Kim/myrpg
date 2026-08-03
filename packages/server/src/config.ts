@@ -9,6 +9,8 @@ export interface GameParams {
   nodeCapacity: number;
   nodeRespawnMs: number;
   rateLimitPerSec: number;
+  craftMsT1: number; // T1 레시피 1개 가공 시간
+  craftSlots: number;
 }
 
 export interface ServerConfig {
@@ -29,6 +31,8 @@ export function defaultGameParams(): GameParams {
     nodeCapacity: GAME.NODE_CAPACITY,
     nodeRespawnMs: GAME.NODE_RESPAWN_MS,
     rateLimitPerSec: GAME.RATE_LIMIT_PER_SEC,
+    craftMsT1: GAME.CRAFT_MS_T1,
+    craftSlots: GAME.CRAFT_SLOTS,
   };
 }
 

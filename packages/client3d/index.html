@@ -24,6 +24,18 @@
       #inv { position: absolute; top: 12px; right: 12px; background: rgba(16,20,28,.8); border: 1px solid #3a4356;
         border-radius: 10px; padding: 10px 14px; min-width: 140px; font-size: 13px; backdrop-filter: blur(4px); }
       #inv h2 { margin: 0 0 6px; font-size: 12px; color: #e6c76a; }
+      #craft { position: absolute; top: 160px; right: 12px; background: rgba(16,20,28,.8); border: 1px solid #3a4356;
+        border-radius: 10px; padding: 10px 14px; width: 200px; font-size: 12px; pointer-events: auto; backdrop-filter: blur(4px); }
+      #craft h2 { margin: 0 0 6px; font-size: 12px; color: #e6c76a; }
+      #craft .recipe { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
+      #craft .recipe button { border: 0; border-radius: 5px; background: #3a4356; color: #eee; cursor: pointer;
+        padding: 2px 8px; margin-left: 3px; font-size: 11px; }
+      #craft .recipe button:hover { background: #4d5a75; }
+      #craft-queue { margin-top: 8px; border-top: 1px solid #3a4356; padding-top: 6px; min-height: 14px; color: #a9b3c4; }
+      #craft-ready { margin: 6px 0; color: #a5d6a7; }
+      #claim-btn { width: 100%; border: 0; border-radius: 6px; background: #e6c76a; color: #10141c;
+        font-weight: bold; padding: 5px; cursor: pointer; }
+      #claim-btn:disabled { background: #3a4356; color: #778; cursor: default; }
       #chatlog { position: absolute; left: 12px; bottom: 50px; width: 340px; max-height: 190px; overflow: hidden;
         display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px; text-shadow: 0 1px 3px #000; }
       #chatlog div { padding: 1px 4px; }
@@ -51,6 +63,13 @@
       <div id="hud">
         <div id="hint">클릭: 이동 · 자원 클릭: 채집 · 휠: 줌 · Enter: 채팅</div>
         <div id="inv"><h2>가방</h2><div id="inv-items">비어 있음</div></div>
+        <div id="craft">
+          <h2>제작 큐</h2>
+          <div id="craft-recipes"></div>
+          <div id="craft-queue"></div>
+          <div id="craft-ready"></div>
+          <button id="claim-btn" disabled>완료품 수령</button>
+        </div>
         <div id="chatlog"></div>
         <div id="gatherbar"><div></div></div>
         <div id="chatbox"><input id="chat-input" placeholder="Enter로 채팅" maxlength="200" /></div>

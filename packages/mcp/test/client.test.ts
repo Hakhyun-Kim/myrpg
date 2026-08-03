@@ -23,6 +23,8 @@ beforeAll(async () => {
         nodeCapacity: 5,
         nodeRespawnMs: 1000,
         rateLimitPerSec: 1000,
+        craftMsT1: 300,
+        craftSlots: 3,
       },
     },
     storage: new MemoryStorage(),
@@ -62,6 +64,28 @@ describe("GameClient (MCP 계층)", () => {
     expect(Math.hypot(c.me.x - 100, c.me.y - 100)).toBeLessThanOrEqual(2);
     c.disconnect();
   }, 15_000);
+
+  it("채집 → 제련 등록 → 완성 대기 → 수령", async () => {
+    const c = new GameClient();
+    await c.connect(url, "mcp_smith");
+    const rock = c.nearestNode("rock")!;
+    await c.gatherNode(rock.id);
+    await c.gatherNode(rock.id);
+    expect(c.inventory["copper_ore"]).toBe(2);
+
+    const q = await c.craft("copper_ingot", 1);
+    expect(q.jobs.length).toBe(1);
+    expect(c.inventory["copper_ore"] ?? 0).toBe(0); // 원료 차감 (inventory 메시지 반영)
+
+    // craftMsT1=300ms — 완성 후 수령
+    await new Promise((r) => setTimeout(r, 600));
+    const res = await c.claim();
+    expect(res.claimed).toEqual({ copper_ingot: 1 });
+    expect(c.inventory["copper_ingot"]).toBe(1);
+
+    await expect(c.craft("copper_ingot", 1)).rejects.toThrow(/no_materials/);
+    c.disconnect();
+  }, 20_000);
 
   it("고갈 노드 채집은 명확한 오류를 던진다", async () => {
     const c = new GameClient();

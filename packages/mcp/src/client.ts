@@ -23,7 +23,16 @@ export interface ChatLine {
 }
 
 type Json = Record<string, any>;
-const CAPTURED = ["chat", "gather_started", "gather_result", "gather_failed"] as const;
+const CAPTURED = [
+  "chat",
+  "gather_started",
+  "gather_result",
+  "gather_failed",
+  "queue_state",
+  "craft_failed",
+  "claim_result",
+  "inventory",
+] as const;
 
 export class GameClient {
   private room: Room | null = null;
@@ -132,7 +141,8 @@ export class GameClient {
       if (this.chatLog.length > 30) this.chatLog.shift();
       return;
     }
-    if (msg.type === "gather_result") this.inventory = msg.inventory;
+    if (msg.type === "gather_result" || msg.type === "claim_result" || msg.type === "inventory")
+      this.inventory = msg.inventory;
     const i = this.waiters.findIndex((w) => w.pred(msg));
     if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(msg);
     else this.queue.push(msg);
@@ -203,6 +213,37 @@ export class GameClient {
     );
     if (result.type === "gather_failed") throw new Error(`채집 실패: ${result.reason}`);
     return { item: result.item, count: result.count };
+  }
+
+  /** 요청-응답 전에 같은 타입의 낡은 푸시 메시지를 버린다 (응답 상관관계 보장). */
+  private dropQueued(...types: string[]): void {
+    this.queue = this.queue.filter((m) => !types.includes(m.type));
+  }
+
+  /** 제작 큐에 작업 등록. 원료는 등록 즉시 차감된다. */
+  async craft(recipeId: string, count: number): Promise<Json> {
+    this.dropQueued("queue_state", "craft_failed");
+    this.send("craft", { recipeId, count });
+    const res = await this.expectMsg(
+      (m) => m.type === "queue_state" || (m.type === "craft_failed" && m.recipeId === recipeId),
+      5000,
+    );
+    if (res.type === "craft_failed") throw new Error(`제작 등록 실패: ${res.reason}`);
+    return res;
+  }
+
+  /** 현재 큐 상태 조회. */
+  async queueState(): Promise<Json> {
+    this.dropQueued("queue_state");
+    this.send("queue");
+    return this.expectMsg((m) => m.type === "queue_state", 5000);
+  }
+
+  /** 완료품 전량 수령. */
+  async claim(): Promise<Json> {
+    this.dropQueued("claim_result");
+    this.send("claim");
+    return this.expectMsg((m) => m.type === "claim_result", 5000);
   }
 
   /** 살아있는 노드 중 (선택적으로 종류 필터) 가장 가까운 것. */

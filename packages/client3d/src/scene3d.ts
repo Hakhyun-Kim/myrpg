@@ -4,6 +4,7 @@ import * as THREE from "three";
 import type { Room } from "colyseus.js";
 import {
   GAME,
+  ITEM_LABELS,
   dist,
   type ChatMsg,
   type GatherFailedMsg,
@@ -178,7 +179,7 @@ export class World3D {
     this.room.onMessage<GatherResultMsg>("gather_result", (msg) => {
       hideGatherBar();
       renderInventory(msg.inventory);
-      pushChat(`획득 +${msg.count} (${msg.item})`, true);
+      pushChat(`획득 +${msg.count} (${ITEM_LABELS[msg.item] ?? msg.item})`, true);
     });
     this.room.onMessage<GatherFailedMsg>("gather_failed", (msg) => {
       hideGatherBar();

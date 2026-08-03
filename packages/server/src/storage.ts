@@ -3,12 +3,22 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Inventory } from "@myrpg/protocol";
 
+export interface CraftJob {
+  id: string;
+  recipeId: string;
+  total: number;
+  done: number; // ready로 옮겨진 수
+  startAt: number; // 현재 진행 중인 유닛의 시작 시각 (Unix ms) — 오프라인 진행의 근거
+}
+
 export interface Account {
   name: string;
   token: string;
   x: number;
   y: number;
   inventory: Inventory;
+  jobs?: CraftJob[]; // 제작 큐 (구버전 세이브 호환 위해 optional)
+  ready?: Inventory; // 완료품 보관함
 }
 
 export interface SaveData {

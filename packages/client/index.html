@@ -23,6 +23,18 @@
       #inv { position: absolute; top: 10px; right: 10px; background: rgba(20,20,30,.85); border: 1px solid #3a3a4a;
         border-radius: 8px; padding: 10px 14px; min-width: 130px; font-size: 13px; }
       #inv h2 { margin: 0 0 6px; font-size: 12px; color: #d8b45a; }
+      #craft { position: absolute; top: 150px; right: 10px; background: rgba(20,20,30,.85); border: 1px solid #3a3a4a;
+        border-radius: 8px; padding: 10px 14px; width: 190px; font-size: 12px; pointer-events: auto; }
+      #craft h2 { margin: 0 0 6px; font-size: 12px; color: #d8b45a; }
+      #craft .recipe { display: flex; align-items: center; justify-content: space-between; margin: 3px 0; }
+      #craft .recipe button { border: 0; border-radius: 4px; background: #3a3a4a; color: #eee; cursor: pointer;
+        padding: 2px 7px; margin-left: 3px; font-size: 11px; }
+      #craft .recipe button:hover { background: #55556a; }
+      #craft-queue { margin-top: 8px; border-top: 1px solid #3a3a4a; padding-top: 6px; min-height: 14px; color: #bbb; }
+      #craft-ready { margin: 6px 0; color: #a5d6a7; }
+      #claim-btn { width: 100%; border: 0; border-radius: 5px; background: #d8b45a; color: #1a1a24;
+        font-weight: bold; padding: 5px; cursor: pointer; }
+      #claim-btn:disabled { background: #3a3a4a; color: #777; cursor: default; }
       #chatlog { position: absolute; left: 10px; bottom: 46px; width: 320px; max-height: 180px; overflow: hidden;
         display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px; text-shadow: 0 1px 2px #000; }
       #chatlog div { padding: 1px 4px; }
@@ -46,6 +58,13 @@
       <div id="hud">
         <div id="status"></div>
         <div id="inv"><h2>가방</h2><div id="inv-items">비어 있음</div></div>
+        <div id="craft">
+          <h2>제작 큐</h2>
+          <div id="craft-recipes"></div>
+          <div id="craft-queue"></div>
+          <div id="craft-ready"></div>
+          <button id="claim-btn" disabled>완료품 수령</button>
+        </div>
         <div id="chatlog"></div>
         <div id="chatbox"><input id="chat-input" placeholder="Enter로 채팅" maxlength="200" /></div>
       </div>

@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { Room } from "colyseus.js";
 import {
   GAME,
+  ITEM_LABELS,
   dist,
   type ChatMsg,
   type GatherFailedMsg,
@@ -28,7 +29,6 @@ interface NodeState {
 
 const NODE_COLOR: Record<string, number> = { tree: 0x2e7d32, rock: 0x78909c, herb: 0xab47bc };
 const NODE_LABEL: Record<string, string> = { tree: "나무", rock: "바위", herb: "약초" };
-const ITEM_LABEL: Record<string, string> = { wood: "원목", copper_ore: "구리 광석", herb: "생약초" };
 
 interface PlayerSprite {
   rect: Phaser.GameObjects.Rectangle;
@@ -108,7 +108,7 @@ export class GameScene extends Phaser.Scene {
     this.room.onMessage<GatherResultMsg>("gather_result", (msg) => {
       this.hideProgress();
       renderInventory(msg.inventory);
-      pushChat(`${ITEM_LABEL[msg.item] ?? msg.item} +${msg.count}`, true);
+      pushChat(`${ITEM_LABELS[msg.item] ?? msg.item} +${msg.count}`, true);
     });
     this.room.onMessage<GatherFailedMsg>("gather_failed", (msg) => {
       this.hideProgress();
@@ -220,7 +220,7 @@ export function renderInventory(inv: Inventory): void {
   el.innerHTML =
     entries.length === 0
       ? "비어 있음"
-      : entries.map(([item, n]) => `${ITEM_LABEL[item] ?? item} × ${n}`).join("<br>");
+      : entries.map(([item, n]) => `${ITEM_LABELS[item] ?? item} × ${n}`).join("<br>");
 }
 
 export function pushChat(text: string, system: boolean): void {

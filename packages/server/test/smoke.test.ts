@@ -22,11 +22,23 @@ const testConfig: ServerConfig = {
     nodeCapacity: 5,
     nodeRespawnMs: 1000,
     rateLimitPerSec: 1000,
+    craftMsT1: 300,
+    craftSlots: 3,
   },
 };
 
 type Json = Record<string, any>;
-const CAPTURED = ["welcome", "chat", "gather_started", "gather_result", "gather_failed"] as const;
+const CAPTURED = [
+  "welcome",
+  "chat",
+  "gather_started",
+  "gather_result",
+  "gather_failed",
+  "queue_state",
+  "craft_failed",
+  "claim_result",
+  "inventory",
+] as const;
 
 /** 룸 메시지를 큐로 받아 조건 대기할 수 있게 감싼 미니 클라이언트. */
 class TestClient {
@@ -147,6 +159,56 @@ describe("PROTOCOL.md 스모크 (Colyseus 계약)", () => {
 
     await bot.leave();
   }, 15_000);
+
+  it("가공 계약: 채집 → craft → queue_state → 완성 → claim", async () => {
+    const c = await TestClient.join(url, { name: "crafter" });
+    const welcome = await c.expectMsg((m) => m.type === "welcome");
+    expect(welcome.queue.slots).toBe(3); // welcome에 큐 상태 포함
+
+    const state = c.room.state as Json;
+    await c.waitState(() => state.nodes.size > 0 && state.players.has(welcome.playerId));
+
+    // 바위에서 광석 2개 채집
+    let rockId = "";
+    let rock: Json | null = null;
+    state.nodes.forEach((n: Json, id: string) => {
+      if (n.kind === "rock" && n.remaining >= 2 && !rock) {
+        rock = n;
+        rockId = id;
+      }
+    });
+    c.room.send("move_to", { x: rock!.x, y: rock!.y });
+    await c.waitState(() => {
+      const p = state.players.get(welcome.playerId);
+      return Math.hypot(p.x - rock!.x, p.y - rock!.y) <= 48;
+    });
+    for (let i = 0; i < 2; i++) {
+      c.room.send("gather", { nodeId: rockId });
+      await c.expectMsg((m) => m.type === "gather_result");
+    }
+
+    // 제련 등록 → 원료 차감 + 큐 상태
+    c.room.send("craft", { recipeId: "copper_ingot", count: 1 });
+    const q1 = await c.expectMsg((m) => m.type === "queue_state");
+    expect(q1.jobs.length).toBe(1);
+    const inv = await c.expectMsg((m) => m.type === "inventory");
+    expect(inv.inventory.copper_ore ?? 0).toBe(0);
+
+    // 완성 통지(서버 push) → 수령
+    const q2 = await c.expectMsg((m) => m.type === "queue_state" && m.jobs.length === 0, 5000);
+    expect(q2.ready).toEqual({ copper_ingot: 1 });
+    c.room.send("claim", {});
+    const claimed = await c.expectMsg((m) => m.type === "claim_result");
+    expect(claimed.claimed).toEqual({ copper_ingot: 1 });
+    expect(claimed.inventory.copper_ingot).toBe(1);
+
+    // 원료 부족 거부
+    c.room.send("craft", { recipeId: "copper_ingot", count: 5 });
+    const fail = await c.expectMsg((m) => m.type === "craft_failed");
+    expect(fail.reason).toBe("no_materials");
+
+    await c.leave();
+  }, 20_000);
 
   it("채팅이 두 클라이언트 사이에 방송된다", async () => {
     const a = await TestClient.join(url, { name: "chat_a" });

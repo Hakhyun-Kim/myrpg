@@ -5,7 +5,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { GAME } from "@myrpg/protocol";
+import { GAME, RECIPES } from "@myrpg/protocol";
 import { GameClient } from "./client.js";
 
 const SERVER_URL = process.env.MYRPG_URL ?? "ws://localhost:7777";
@@ -91,6 +91,42 @@ mcp.tool(
     }
   },
 );
+
+mcp.tool(
+  "craft",
+  "제작 큐에 가공 작업을 등록한다 (원료 즉시 차감, 회당 30초, 슬롯 3개, 오프라인에도 진행). 레시피: plank(판재)=원목2, copper_ingot(구리 주괴)=구리 광석2, herb_extract(약초 추출액)=생약초2. 완성품은 보관함에 쌓이며 claim으로 수령.",
+  {
+    recipeId: z.enum(Object.keys(RECIPES) as [string, ...string[]]).describe("레시피 id"),
+    count: z.number().int().min(1).max(GAME.CRAFT_MAX_COUNT).describe("제작 수량"),
+  },
+  async ({ recipeId, count }) => {
+    try {
+      await client.ensureConnected();
+      const q = await client.craft(recipeId, count);
+      return ok({ queue: q, inventory: client.inventory });
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool("queue", "제작 큐 상태를 본다: 진행 중 작업(다음 완성 시각 포함)과 완료품 보관함.", {}, async () => {
+  try {
+    await client.ensureConnected();
+    return ok(await client.queueState());
+  } catch (err) {
+    return fail(err);
+  }
+});
+
+mcp.tool("claim", "제작 완료품을 전량 수령해 가방에 넣는다.", {}, async () => {
+  try {
+    await client.ensureConnected();
+    return ok(await client.claim());
+  } catch (err) {
+    return fail(err);
+  }
+});
 
 mcp.tool(
   "say",

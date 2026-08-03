@@ -72,6 +72,9 @@ state.nodes    : Map<nodeId,   { kind, x, y, remaining }>
 | `stop` | — | 정지 |
 | `chat` | `{ text }` | 전체 채팅 (≤200자) |
 | `gather` | `{ nodeId }` | 채집 시도 (§6) |
+| `craft` | `{ recipeId, count }` | 제작 큐 등록 (§7). count 1~20 |
+| `queue` | — | 제작 큐 상태 요청 → `queue_state` |
+| `claim` | — | 완료품 전량 수령 → `claim_result` |
 
 형식 위반 메시지는 조용히 무시된다 (서버는 판정만 한다 — 올바른 요청을 보내는 것은 클라이언트의 몫).
 
@@ -96,7 +99,33 @@ state.nodes    : Map<nodeId,   { kind, x, y, remaining }>
 
 - 노드는 고갈 후 **30초** 뒤 5로 리스폰 (스키마 `remaining` 변화로 관측).
 
-## 7. 봇 작성자를 위한 최소 절차
+## 7. 제작 큐 (가공)
+
+원료 → 중간재 가공. **오프라인에도 진행된다** — 서버가 타임스탬프로 정산하므로 로그아웃·재접속과 무관하다.
+
+**T1 레시피** (`recipeId`):
+
+| recipeId | 산출 | 원료 | 소요 |
+|---|---|---|---|
+| `plank` | 판재 ×1 | 원목(wood) ×2 | 30초 |
+| `copper_ingot` | 구리 주괴 ×1 | 구리 광석(copper_ore) ×2 | 30초 |
+| `herb_extract` | 약초 추출액 ×1 | 생약초(herb) ×2 | 30초 |
+
+규칙:
+- 슬롯 **3개** — 동시에 3개 작업까지, 슬롯끼리는 병렬 진행. 작업 1건 = 레시피 × 수량(1~20), 수량은 슬롯 안에서 순차 생산
+- 원료는 **등록 즉시 차감** (취소 불가). 완성품은 **보관함(ready)** 에 쌓이고 `claim`으로 수령해야 가방에 들어간다
+- `welcome.queue`에 입장 시점의 큐 상태가 들어 있다
+
+**S→C 메시지:**
+
+| type | 페이로드 | 설명 |
+|---|---|---|
+| `queue_state` | `{ jobs: [{id, recipeId, total, done, nextDoneAt}], ready, slots }` | craft/claim 후, 그리고 접속 중 완성 시 서버가 밀어줌 |
+| `craft_failed` | `{ recipeId, reason }` | `unknown_recipe` \| `no_materials` \| `slots_full` \| `bad_count` |
+| `claim_result` | `{ claimed, inventory }` | 수령 내역 + 가방 스냅샷 |
+| `inventory` | `{ inventory }` | 원료 차감 등 가방 변동 스냅샷 |
+
+## 8. 봇 작성자를 위한 최소 절차
 
 ```
 1. joinOrCreate("haran", { name }) → 핸들러 등록 → send("hello") → welcome 수신, token 저장

@@ -1,11 +1,5 @@
 // DOM HUD — 인벤토리·채팅·채집 진행바 (2D 테스트 클라이언트와 동일한 구조)
-import type { Inventory } from "@myrpg/protocol";
-
-export const ITEM_LABEL: Record<string, string> = {
-  wood: "원목",
-  copper_ore: "구리 광석",
-  herb: "생약초",
-};
+import { ITEM_LABELS, type Inventory } from "@myrpg/protocol";
 
 export function renderInventory(inv: Inventory): void {
   const el = document.getElementById("inv-items")!;
@@ -13,7 +7,7 @@ export function renderInventory(inv: Inventory): void {
   el.innerHTML =
     entries.length === 0
       ? "비어 있음"
-      : entries.map(([item, n]) => `${ITEM_LABEL[item] ?? item} × ${n}`).join("<br>");
+      : entries.map(([item, n]) => `${ITEM_LABELS[item] ?? item} × ${n}`).join("<br>");
 }
 
 export function pushChat(text: string, system: boolean): void {

@@ -9,6 +9,7 @@ import { z } from "zod";
 const require = createRequire(import.meta.url);
 const { Room, ServerError } = require("colyseus") as typeof import("colyseus");
 import { GAME, PROTOCOL_VERSION, type JoinOptions, type WelcomeMsg } from "@myrpg/protocol";
+import { claim, queueView, tryCraft } from "./craft.js";
 import type { ServerConfig } from "./config.js";
 import type { SaveData, Storage } from "./storage.js";
 import { SPAWN, World, type WorldEvent } from "./world.js";
@@ -32,6 +33,10 @@ const joinSchema = z.object({
 const moveSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
 const chatSchema = z.object({ text: z.string().min(1).max(GAME.MAX_CHAT_LEN) });
 const gatherSchema = z.object({ nodeId: z.string().max(64) });
+const craftSchema = z.object({
+  recipeId: z.string().max(64),
+  count: z.number().int().min(1).max(GAME.CRAFT_MAX_COUNT),
+});
 
 export class HaranRoom extends Room<HaranState> {
   private world!: World;
@@ -100,6 +105,38 @@ export class HaranRoom extends Room<HaranState> {
       if (r.ok) client.send("gather_started", { nodeId: msg.data.nodeId, endsAt: r.endsAt });
       else client.send("gather_failed", { nodeId: msg.data.nodeId, reason: r.reason });
     });
+
+    // ---- 제작 큐 (PROTOCOL.md §8) ----
+    this.onMessage("craft", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = craftSchema.safeParse(raw);
+      const account = this.accountOf(client);
+      if (!account) return;
+      if (!msg.success) {
+        client.send("craft_failed", { recipeId: String((raw as { recipeId?: unknown })?.recipeId ?? "?"), reason: "bad_count" });
+        return;
+      }
+      const r = tryCraft(account, msg.data.recipeId, msg.data.count, Date.now(), config.game);
+      if (!r.ok) {
+        client.send("craft_failed", { recipeId: msg.data.recipeId, reason: r.reason });
+        return;
+      }
+      client.send("queue_state", queueView(account, Date.now(), config.game));
+      client.send("inventory", { inventory: { ...account.inventory } }); // 원료 차감 반영
+    });
+    this.onMessage("queue", (client) => {
+      if (!this.allow(client)) return;
+      const account = this.accountOf(client);
+      if (account) client.send("queue_state", queueView(account, Date.now(), config.game));
+    });
+    this.onMessage("claim", (client) => {
+      if (!this.allow(client)) return;
+      const account = this.accountOf(client);
+      if (!account) return;
+      const claimed = claim(account, Date.now(), config.game);
+      client.send("claim_result", { claimed, inventory: { ...account.inventory } });
+      client.send("queue_state", queueView(account, Date.now(), config.game));
+    });
   }
 
   onJoin(client: Client, options: unknown): void {
@@ -152,9 +189,23 @@ export class HaranRoom extends Room<HaranState> {
   }
 
   // ---- 틱: world가 진실, 스키마는 투영 ----
+  private lastCraftCheck = 0;
+
   private update(dtMs: number): void {
     const now = Date.now();
     for (const ev of this.world.tick(now, dtMs)) this.dispatch(ev);
+
+    // 접속 중인 플레이어의 제작 완료를 1초 주기로 확인해 밀어준다 (오프라인은 다음 접근 때 정산)
+    if (now - this.lastCraftCheck >= 1000) {
+      this.lastCraftCheck = now;
+      for (const client of this.byPlayerId.values()) {
+        const account = this.accountOf(client);
+        if (!account?.jobs?.length) continue;
+        const ms = this.deps.config.game.craftMsT1;
+        const due = account.jobs.some((j) => now >= j.startAt + ms);
+        if (due) client.send("queue_state", queueView(account, now, this.deps.config.game));
+      }
+    }
   }
 
   private dispatch(ev: WorldEvent): void {
@@ -203,7 +254,13 @@ export class HaranRoom extends Room<HaranState> {
       playerId: ud.playerId,
       token: account.token,
       inventory: { ...(p?.inventory ?? account.inventory) },
+      queue: queueView(account, Date.now(), this.deps.config.game),
     };
+  }
+
+  private accountOf(client: Client): (typeof this.deps.save.accounts)[string] | null {
+    const ud = client.userData as UserData | undefined;
+    return ud ? (this.deps.save.accounts[ud.accountName] ?? null) : null;
   }
 
   private playerOf(client: Client) {
