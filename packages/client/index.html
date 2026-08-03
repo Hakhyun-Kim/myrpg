@@ -35,6 +35,27 @@
       #claim-btn { width: 100%; border: 0; border-radius: 5px; background: #d8b45a; color: #1a1a24;
         font-weight: bold; padding: 5px; cursor: pointer; }
       #claim-btn:disabled { background: #3a3a4a; color: #777; cursor: default; }
+      #trade { display: none; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+        background: rgba(20,20,30,.95); border: 1px solid #d8b45a; border-radius: 10px; padding: 14px 18px;
+        width: 340px; font-size: 12px; pointer-events: auto; z-index: 8; }
+      #trade h2 { margin: 0 0 8px; font-size: 13px; color: #d8b45a; }
+      #trade h3 { margin: 6px 0 4px; font-size: 11px; color: #999; }
+      #trade .cols { display: flex; gap: 14px; }
+      #trade .cols > div { flex: 1; }
+      .trade-item { cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+      .trade-item:hover { background: #33334a; }
+      #trade-status { margin: 8px 0; color: #d8b45a; }
+      #trade .btns { display: flex; gap: 8px; }
+      #trade .btns button { flex: 1; border: 0; border-radius: 5px; padding: 6px; cursor: pointer; font-weight: bold; }
+      #trade-accept { background: #d8b45a; color: #1a1a24; }
+      #trade-accept:disabled { background: #3a3a4a; color: #777; }
+      #trade-cancel { background: #3a3a4a; color: #eee; }
+      #trade-req { display: none; position: absolute; left: 50%; top: 14px; transform: translateX(-50%);
+        background: rgba(20,20,30,.95); border: 1px solid #d8b45a; border-radius: 8px; padding: 8px 14px;
+        font-size: 13px; pointer-events: auto; z-index: 8; }
+      #trade-req button { border: 0; border-radius: 4px; padding: 3px 10px; margin-left: 6px; cursor: pointer; }
+      #trade-req-yes { background: #d8b45a; }
+      #trade-req-no { background: #3a3a4a; color: #eee; }
       #chatlog { position: absolute; left: 10px; bottom: 46px; width: 320px; max-height: 180px; overflow: hidden;
         display: flex; flex-direction: column; justify-content: flex-end; font-size: 13px; text-shadow: 0 1px 2px #000; }
       #chatlog div { padding: 1px 4px; }
@@ -67,6 +88,18 @@
         </div>
         <div id="chatlog"></div>
         <div id="chatbox"><input id="chat-input" placeholder="Enter로 채팅" maxlength="200" /></div>
+        <div id="trade-req">🤝 <span id="trade-req-name"></span> 님의 거래 요청
+          <button id="trade-req-yes">수락</button><button id="trade-req-no">거절</button></div>
+        <div id="trade">
+          <h2>거래 — <span id="trade-partner"></span></h2>
+          <div class="cols">
+            <div><h3>내 제안 (클릭해 빼기)</h3><div id="trade-mine"></div>
+              <h3>가방 (클릭해 넣기)</h3><div id="trade-bag"></div></div>
+            <div><h3>상대 제안</h3><div id="trade-theirs"></div></div>
+          </div>
+          <div id="trade-status"></div>
+          <div class="btns"><button id="trade-accept">확정</button><button id="trade-cancel">취소</button></div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

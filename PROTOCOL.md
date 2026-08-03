@@ -75,6 +75,11 @@ state.nodes    : Map<nodeId,   { kind, x, y, remaining }>
 | `craft` | `{ recipeId, count }` | 제작 큐 등록 (§7). count 1~20 |
 | `queue` | — | 제작 큐 상태 요청 → `queue_state` |
 | `claim` | — | 완료품 전량 수령 → `claim_result` |
+| `trade_request` | `{ playerId }` | 대면 거래 요청 (§8). 96px 이내 |
+| `trade_respond` | `{ accept }` | 받은 요청에 응답 |
+| `trade_offer` | `{ items }` | 내 제안 전체 교체 |
+| `trade_accept` | — | 내 쪽 확정 |
+| `trade_cancel` | — | 거래 취소 |
 
 형식 위반 메시지는 조용히 무시된다 (서버는 판정만 한다 — 올바른 요청을 보내는 것은 클라이언트의 몫).
 
@@ -125,7 +130,34 @@ state.nodes    : Map<nodeId,   { kind, x, y, remaining }>
 | `claim_result` | `{ claimed, inventory }` | 수령 내역 + 가방 스냅샷 |
 | `inventory` | `{ inventory }` | 원료 차감 등 가방 변동 스냅샷 |
 
-## 8. 봇 작성자를 위한 최소 절차
+## 8. 대면 거래
+
+1:1, 양측 확정, 원자적 교환. 흐름:
+
+```
+A: trade_request {playerId:B}   (A·B 거리 ≤ 96px, 요청 유효 30초)
+B ← trade_requested {from, name}
+B: trade_respond {accept:true}
+양쪽 ← trade_open {partner} → trade_update
+양쪽: trade_offer {items} 자유롭게 변경   ※ 제안이 바뀌면 양측 확정이 풀린다
+양쪽: trade_accept → 둘 다 확정되는 순간 서버가 재고·거리를 재검증 후 원자적으로 교환
+양쪽 ← trade_done {gave, received, inventory}
+```
+
+**S→C 메시지:**
+
+| type | 페이로드 | 설명 |
+|---|---|---|
+| `trade_requested` | `{ from, name }` | 요청 수신 |
+| `trade_open` | `{ partner: {id, name} }` | 거래 시작 |
+| `trade_update` | `{ myOffer, partnerOffer, myAccept, partnerAccept }` | 제안·확정 변화마다 (수신자 기준으로 개인화) |
+| `trade_done` | `{ gave, received, inventory }` | 교환 완료 |
+| `trade_closed` | `{ reason }` | `declined` \| `cancelled` \| `too_far` \| `partner_left` \| `invalid_offer` \| `expired` |
+| `trade_failed` | `{ reason }` | 요청/제안 거부: `self` \| `busy` \| `not_found` \| `too_far` \| `invalid_offer` |
+
+안전 규칙: 보유하지 않은 물건은 제안 불가 · 교환 직전 재고를 다시 검증(거래 중 소모 대비) · 거래 중 144px 초과로 멀어지면 자동 취소 · 이탈 시 자동 취소.
+
+## 9. 봇 작성자를 위한 최소 절차
 
 ```
 1. joinOrCreate("haran", { name }) → 핸들러 등록 → send("hello") → welcome 수신, token 저장

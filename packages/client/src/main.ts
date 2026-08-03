@@ -4,6 +4,7 @@ import { GAME } from "@myrpg/protocol";
 import { joinGame } from "./net.js";
 import { GameScene, pushChat, renderInventory } from "./GameScene.js";
 import { initCraftPanel } from "./craftPanel.js";
+import { initTradePanel } from "./tradePanel.js";
 
 const form = document.getElementById("login-form") as HTMLFormElement;
 const nameInput = document.getElementById("name") as HTMLInputElement;
@@ -42,6 +43,7 @@ async function enter(name: string): Promise<void> {
     game.scene.add("game", GameScene, true, { room, welcome });
     wireChat(room);
     initCraftPanel(room, welcome.queue, renderInventory, (text) => pushChat(text, true));
+    initTradePanel(room, welcome.inventory, renderInventory, (text) => pushChat(text, true));
 
     room.onLeave((code) => {
       pushChat(code === 4001 ? "다른 곳에서 접속해 연결이 종료됐습니다." : "서버 연결이 끊어졌습니다. 새로고침하세요.", true);

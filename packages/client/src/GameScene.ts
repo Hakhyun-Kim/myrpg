@@ -118,6 +118,13 @@ export class GameScene extends Phaser.Scene {
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
       const wx = pointer.worldX;
       const wy = pointer.worldY;
+      // 다른 플레이어 클릭 → 거래 요청
+      const targetPid = this.playerAt(wx, wy);
+      if (targetPid) {
+        this.room.send("trade_request", { playerId: targetPid });
+        pushChat("거래 요청을 보냈습니다", true);
+        return;
+      }
       const nodeId = this.nodeAt(wx, wy);
       const node = nodeId ? this.nodes.get(nodeId) : null;
       if (nodeId && node && node.state.remaining > 0) {
@@ -191,6 +198,14 @@ export class GameScene extends Phaser.Scene {
     sprite.state = n;
     sprite.circle.setAlpha(n.remaining > 0 ? 1 : 0.25);
     sprite.label.setText(`${NODE_LABEL[n.kind] ?? n.kind} ${n.remaining}`);
+  }
+
+  private playerAt(x: number, y: number): string | null {
+    for (const [id, s] of this.players) {
+      if (id === this.welcome.playerId) continue;
+      if (dist(x, y, s.x, s.y) <= 24) return id;
+    }
+    return null;
   }
 
   private nodeAt(x: number, y: number): string | null {

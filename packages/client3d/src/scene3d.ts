@@ -50,6 +50,7 @@ export class World3D {
   private players = new Map<string, PlayerObj>();
   private nodes = new Map<string, NodeObj>();
   private clickables: THREE.Object3D[] = [];
+  private playerClickables: THREE.Object3D[] = [];
   private ground!: THREE.Mesh;
   private pendingGather: string | null = null;
   private zoom = 1;
@@ -167,6 +168,7 @@ export class World3D {
       if (obj) {
         this.scene.remove(obj.group);
         this.players.delete(id);
+        this.playerClickables = this.playerClickables.filter((o) => o.userData.playerId !== id);
       }
     });
     state.nodes.onAdd((n, id) => {
@@ -208,6 +210,11 @@ export class World3D {
     group.position.set(p.x, 0, p.y);
     this.scene.add(group);
     this.players.set(id, { group, sx: p.x, sy: p.y });
+    if (!isMe) {
+      group.userData.playerId = id;
+      group.traverse((o) => (o.userData.playerId = id));
+      this.playerClickables.push(group);
+    }
   }
 
   private addNode(id: string, n: NodeState): void {
@@ -286,6 +293,17 @@ export class World3D {
         -(ev.clientY / window.innerHeight) * 2 + 1,
       );
       this.raycaster.setFromCamera(ndc, this.camera);
+
+      // 다른 플레이어 클릭 → 거래 요청
+      const playerHit = this.raycaster.intersectObjects(this.playerClickables, true)[0];
+      if (playerHit) {
+        const pid = playerHit.object.userData.playerId as string | undefined;
+        if (pid) {
+          this.room.send("trade_request", { playerId: pid });
+          pushChat("거래 요청을 보냈습니다", true);
+          return;
+        }
+      }
 
       const nodeHit = this.raycaster.intersectObjects(this.clickables, true)[0];
       if (nodeHit) {

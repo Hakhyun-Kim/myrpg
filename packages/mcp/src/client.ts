@@ -32,6 +32,12 @@ const CAPTURED = [
   "craft_failed",
   "claim_result",
   "inventory",
+  "trade_requested",
+  "trade_open",
+  "trade_update",
+  "trade_done",
+  "trade_closed",
+  "trade_failed",
 ] as const;
 
 export class GameClient {
@@ -43,6 +49,8 @@ export class GameClient {
   name = "";
   inventory: Inventory = {};
   chatLog: ChatLine[] = [];
+  activeTrade: { partner: { id: string; name: string }; update: Json | null } | null = null;
+  pendingRequest: { from: string; name: string } | null = null; // 나에게 온 거래 요청
   private lastUrl = "";
 
   get connected(): boolean {
@@ -141,8 +149,17 @@ export class GameClient {
       if (this.chatLog.length > 30) this.chatLog.shift();
       return;
     }
-    if (msg.type === "gather_result" || msg.type === "claim_result" || msg.type === "inventory")
+    if (
+      msg.type === "gather_result" ||
+      msg.type === "claim_result" ||
+      msg.type === "inventory" ||
+      msg.type === "trade_done"
+    )
       this.inventory = msg.inventory;
+    if (msg.type === "trade_requested") this.pendingRequest = { from: msg.from, name: msg.name };
+    if (msg.type === "trade_open") this.activeTrade = { partner: msg.partner, update: null };
+    if (msg.type === "trade_update" && this.activeTrade) this.activeTrade.update = msg;
+    if (msg.type === "trade_done" || msg.type === "trade_closed") this.activeTrade = null;
     const i = this.waiters.findIndex((w) => w.pred(msg));
     if (i >= 0) this.waiters.splice(i, 1)[0]!.resolve(msg);
     else this.queue.push(msg);
@@ -246,6 +263,63 @@ export class GameClient {
     return this.expectMsg((m) => m.type === "claim_result", 5000);
   }
 
+  /** 이름으로 접속 중인 플레이어 id를 찾는다. */
+  findPlayer(nameOrId: string): { id: string; name: string; x: number; y: number } | null {
+    let found: { id: string; name: string; x: number; y: number } | null = null;
+    this.state.players.forEach((p: Json, id: string) => {
+      if (id === nameOrId || p.name === nameOrId) found = { id, name: p.name, x: p.x, y: p.y };
+    });
+    return found;
+  }
+
+  /** 거래 요청 → 상대 수락(trade_open)까지 대기. 멀면 먼저 다가간다. */
+  async requestTrade(nameOrId: string, timeoutMs = 60_000): Promise<Json> {
+    const target = this.findPlayer(nameOrId);
+    if (!target) throw new Error(`접속 중인 플레이어가 아닙니다: ${nameOrId}`);
+    if (dist(this.me.x, this.me.y, target.x, target.y) > GAME.TRADE_RANGE - 10)
+      await this.goto(target.x + 30, target.y);
+    this.dropQueued("trade_open", "trade_failed", "trade_closed");
+    this.send("trade_request", { playerId: target.id });
+    const res = await this.expectMsg(
+      (m) => m.type === "trade_open" || m.type === "trade_failed" || m.type === "trade_closed",
+      timeoutMs,
+    );
+    if (res.type !== "trade_open") throw new Error(`거래 열기 실패: ${res.reason}`);
+    return res;
+  }
+
+  /** 나에게 온 거래 요청에 응답. 수락 시 trade_open까지 대기. */
+  async respondTrade(accept: boolean): Promise<Json | null> {
+    this.dropQueued("trade_open");
+    this.send("trade_respond", { accept });
+    this.pendingRequest = null;
+    if (!accept) return null;
+    return this.expectMsg((m) => m.type === "trade_open" || m.type === "trade_closed", 10_000);
+  }
+
+  /** 내 제안 전체 교체. */
+  async offerTrade(items: Inventory): Promise<Json> {
+    this.dropQueued("trade_update", "trade_failed");
+    this.send("trade_offer", { items });
+    const res = await this.expectMsg((m) => m.type === "trade_update" || m.type === "trade_failed", 5000);
+    if (res.type === "trade_failed") throw new Error(`제안 실패: ${res.reason}`);
+    return res;
+  }
+
+  /** 확정 — 상대도 확정해 교환이 끝나거나 거래가 닫힐 때까지 대기. */
+  async acceptTrade(timeoutMs = 90_000): Promise<Json> {
+    this.dropQueued("trade_done", "trade_closed");
+    this.send("trade_accept", {});
+    const res = await this.expectMsg((m) => m.type === "trade_done" || m.type === "trade_closed", timeoutMs);
+    if (res.type === "trade_closed") throw new Error(`거래 종료: ${res.reason}`);
+    return res;
+  }
+
+  cancelTrade(): void {
+    this.send("trade_cancel", {});
+    this.activeTrade = null;
+  }
+
   /** 살아있는 노드 중 (선택적으로 종류 필터) 가장 가까운 것. */
   nearestNode(kind?: string): NodeView | null {
     let best: NodeView | null = null;
@@ -282,6 +356,8 @@ export class GameClient {
         }))
         .sort((a, b) => a.distance - b.distance),
       recentChat: this.chatLog.slice(-10),
+      ...(this.activeTrade ? { activeTrade: this.activeTrade } : {}),
+      ...(this.pendingRequest ? { incomingTradeRequest: this.pendingRequest } : {}),
     };
   }
 }

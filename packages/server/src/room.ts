@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const { Room, ServerError } = require("colyseus") as typeof import("colyseus");
 import { GAME, PROTOCOL_VERSION, type JoinOptions, type WelcomeMsg } from "@myrpg/protocol";
 import { claim, queueView, tryCraft } from "./craft.js";
+import { TradeManager } from "./trade.js";
 import type { ServerConfig } from "./config.js";
 import type { SaveData, Storage } from "./storage.js";
 import { SPAWN, World, type WorldEvent } from "./world.js";
@@ -37,12 +38,21 @@ const craftSchema = z.object({
   recipeId: z.string().max(64),
   count: z.number().int().min(1).max(GAME.CRAFT_MAX_COUNT),
 });
+const tradeRequestSchema = z.object({ playerId: z.string().max(64) });
+const tradeRespondSchema = z.object({ accept: z.boolean() });
+const tradeOfferSchema = z.object({
+  items: z.record(z.string().max(64), z.number().int().min(1).max(9999)).refine(
+    (r) => Object.keys(r).length <= 16,
+    { message: "품목 수 초과" },
+  ),
+});
 
 export class HaranRoom extends Room<HaranState> {
   private world!: World;
   private deps!: RoomDeps;
   private byPlayerId = new Map<string, Client>();
   private buckets = new Map<string, { start: number; count: number }>();
+  private trades!: TradeManager;
 
   onCreate(options: { deps: RoomDeps }): void {
     this.deps = options.deps;
@@ -60,6 +70,20 @@ export class HaranRoom extends Room<HaranState> {
       state.nodes.set(n.id, new NodeSchema(n.kind, n.x, n.y, n.remaining));
     }
     this.setState(state);
+
+    this.trades = new TradeManager(
+      {
+        name: (pid) => this.world.players.get(pid)?.name ?? "?",
+        pos: (pid) => {
+          const p = this.world.players.get(pid);
+          return p ? { x: p.x, y: p.y } : null;
+        },
+        inventory: (pid) => this.world.players.get(pid)?.inventory ?? null,
+        send: (pid, type, payload) => this.byPlayerId.get(pid)?.send(type, payload),
+      },
+      GAME.TRADE_RANGE,
+      GAME.TRADE_REQUEST_TTL_MS,
+    );
 
     this.setSimulationInterval((dt) => this.update(dt), config.game.tickMs);
     this.setPatchRate(config.game.tickMs);
@@ -137,6 +161,40 @@ export class HaranRoom extends Room<HaranState> {
       client.send("claim_result", { claimed, inventory: { ...account.inventory } });
       client.send("queue_state", queueView(account, Date.now(), config.game));
     });
+
+    // ---- 대면 거래 (PROTOCOL.md §8) ----
+    this.onMessage("trade_request", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = tradeRequestSchema.safeParse(raw);
+      const ud = client.userData as UserData | undefined;
+      if (!msg.success || !ud) return;
+      this.trades.request(ud.playerId, msg.data.playerId, Date.now());
+    });
+    this.onMessage("trade_respond", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = tradeRespondSchema.safeParse(raw);
+      const ud = client.userData as UserData | undefined;
+      if (!msg.success || !ud) return;
+      this.trades.respond(ud.playerId, msg.data.accept);
+    });
+    this.onMessage("trade_offer", (client, raw) => {
+      if (!this.allow(client)) return;
+      const msg = tradeOfferSchema.safeParse(raw);
+      const ud = client.userData as UserData | undefined;
+      if (!ud) return;
+      if (!msg.success) return client.send("trade_failed", { reason: "invalid_offer" });
+      this.trades.offer(ud.playerId, msg.data.items);
+    });
+    this.onMessage("trade_accept", (client) => {
+      if (!this.allow(client)) return;
+      const ud = client.userData as UserData | undefined;
+      if (ud) this.trades.accept(ud.playerId);
+    });
+    this.onMessage("trade_cancel", (client) => {
+      if (!this.allow(client)) return;
+      const ud = client.userData as UserData | undefined;
+      if (ud) this.trades.cancel(ud.playerId);
+    });
   }
 
   onJoin(client: Client, options: unknown): void {
@@ -178,6 +236,7 @@ export class HaranRoom extends Room<HaranState> {
     if (!ud) return;
     this.buckets.delete(client.sessionId);
     if (this.byPlayerId.get(ud.playerId) !== client) return; // 승계됨
+    this.trades.onDisconnect(ud.playerId);
     this.persist(ud);
     this.byPlayerId.delete(ud.playerId);
     this.world.removePlayer(ud.playerId);
@@ -198,6 +257,7 @@ export class HaranRoom extends Room<HaranState> {
     // 접속 중인 플레이어의 제작 완료를 1초 주기로 확인해 밀어준다 (오프라인은 다음 접근 때 정산)
     if (now - this.lastCraftCheck >= 1000) {
       this.lastCraftCheck = now;
+      this.trades.tick(now); // 거래 요청 만료·거리 이탈 점검
       for (const client of this.byPlayerId.values()) {
         const account = this.accountOf(client);
         if (!account?.jobs?.length) continue;

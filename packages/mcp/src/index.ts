@@ -129,6 +129,74 @@ mcp.tool("claim", "제작 완료품을 전량 수령해 가방에 넣는다.", {
 });
 
 mcp.tool(
+  "trade_request",
+  "다른 플레이어에게 대면 거래를 요청하고 상대가 수락할 때까지 기다린다 (멀면 자동으로 다가감, 요청 유효 30초). 열리면 trade_offer로 제안하고 trade_accept로 확정한다.",
+  { player: z.string().describe("상대 이름 또는 playerId (look의 players 참고)") },
+  async ({ player }) => {
+    try {
+      await client.ensureConnected();
+      const r = await client.requestTrade(player);
+      return ok({ opened: r, hint: "trade_offer로 제안 → trade_accept로 확정" });
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool(
+  "trade_respond",
+  "나에게 온 거래 요청(look의 incomingTradeRequest)에 응답한다.",
+  { accept: z.boolean() },
+  async ({ accept }) => {
+    try {
+      await client.ensureConnected();
+      const r = await client.respondTrade(accept);
+      return ok(accept ? { opened: r } : "거절했습니다");
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool(
+  "trade_offer",
+  "진행 중인 거래에서 내 제안을 통째로 교체한다 (예: {\"wood\": 2}). 제안이 바뀌면 양측 확정이 풀린다.",
+  { items: z.record(z.string(), z.number().int().min(1)).describe("아이템 id → 수량") },
+  async ({ items }) => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.offerTrade(items));
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool(
+  "trade_accept",
+  "내 쪽 확정. 상대도 확정하면 교환이 실행된다 — 완료(또는 종료)까지 기다린 뒤 결과를 반환한다.",
+  {},
+  async () => {
+    try {
+      await client.ensureConnected();
+      return ok(await client.acceptTrade());
+    } catch (err) {
+      return fail(err);
+    }
+  },
+);
+
+mcp.tool("trade_cancel", "진행 중인 거래를 취소한다.", {}, async () => {
+  try {
+    await client.ensureConnected();
+    client.cancelTrade();
+    return ok("취소했습니다");
+  } catch (err) {
+    return fail(err);
+  }
+});
+
+mcp.tool(
   "say",
   "전체 채팅으로 말한다 (같은 세계의 사람·AI 모두에게 보인다).",
   { text: z.string().min(1).max(GAME.MAX_CHAT_LEN) },

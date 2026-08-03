@@ -18,6 +18,8 @@ export const GAME = {
   CRAFT_SLOTS: 3,
   CRAFT_MS_T1: 30_000,
   CRAFT_MAX_COUNT: 20, // 작업 1건당 최대 수량
+  TRADE_RANGE: 96, // 대면 거래 가능 거리 (px)
+  TRADE_REQUEST_TTL_MS: 30_000,
 } as const;
 
 export type NodeKind = "tree" | "rock" | "herb";
@@ -89,6 +91,15 @@ export const RECIPES: Record<string, RecipeDef> = {
     output: "herb_extract",
     outputCount: 1,
   },
+  copper_knife: {
+    id: "copper_knife",
+    label: "구리 단검",
+    skill: "대장",
+    tier: 1,
+    input: { copper_ingot: 1, plank: 1 },
+    output: "copper_knife",
+    outputCount: 1,
+  },
 };
 
 export const ITEM_LABELS: Record<string, string> = {
@@ -98,6 +109,7 @@ export const ITEM_LABELS: Record<string, string> = {
   plank: "판재",
   copper_ingot: "구리 주괴",
   herb_extract: "약초 추출액",
+  copper_knife: "구리 단검",
 };
 
 // ---- 룸 입장 옵션 (joinOrCreate 두 번째 인자) ----
@@ -124,6 +136,18 @@ export interface CraftMsg {
 // "queue": 페이로드 없음 — 현재 큐 상태 요청 (queue_state로 응답)
 // "claim": 페이로드 없음 — 완료품 전량 수령 (claim_result로 응답)
 // "hello": 페이로드 없음 — 핸들러 등록 후 welcome을 요청하는 핸드셰이크
+
+// ---- 대면 거래 (§8) ----
+export interface TradeRequestMsg {
+  playerId: string; // 대상
+}
+export interface TradeRespondMsg {
+  accept: boolean;
+}
+export interface TradeOfferMsg {
+  items: Inventory; // 내 제안 전체 교체
+}
+// "trade_accept" / "trade_cancel": 페이로드 없음
 
 // ---- S→C 룸 메시지 페이로드 ----
 export interface CraftJobView {
@@ -154,6 +178,40 @@ export interface ClaimResultMsg {
 
 export interface InventoryMsg {
   inventory: Inventory; // 인벤토리 전체 스냅샷 (원료 차감 등 gather 외 변동 시)
+}
+
+// ---- 거래 S→C ----
+export interface TradeRequestedMsg {
+  from: string;
+  name: string;
+}
+export interface TradeOpenMsg {
+  partner: { id: string; name: string };
+}
+export interface TradeUpdateMsg {
+  myOffer: Inventory;
+  partnerOffer: Inventory;
+  myAccept: boolean;
+  partnerAccept: boolean;
+}
+export interface TradeDoneMsg {
+  gave: Inventory;
+  received: Inventory;
+  inventory: Inventory;
+}
+export type TradeCloseReason =
+  | "declined"
+  | "cancelled"
+  | "too_far"
+  | "partner_left"
+  | "invalid_offer"
+  | "expired";
+export interface TradeClosedMsg {
+  reason: TradeCloseReason;
+}
+export type TradeFailReason = "self" | "busy" | "not_found" | "too_far" | "invalid_offer";
+export interface TradeFailedMsg {
+  reason: TradeFailReason;
 }
 
 export interface WelcomeMsg {
